@@ -2,50 +2,54 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: opa-policies
-  namespace: opa-keycloak-practice
+  namespace: default
 data:
-  policy.rego: |
-    package system.authz
-    
+  employee-authz.rego: |
+    package employee.authz
+
+    import rego.v1
+
     default allow := false
-    
+
+    # Allow access to health endpoint without authentication
     allow if {
-        valid_token
-        has_permission
+        input.path == "/health"
     }
-    
-    valid_token if {
-        input.token
-        count(io.jwt.decode(input.token)) == 3
+
+    # Extract JWT token and decode it
+    token := t if {
+        [_, encoded] := split(input.token, " ")
+        [_, payload, _] := io.jwt.decode(encoded)
+        t := payload
     }
-    
-    user := payload if {
-        [_, payload, _] := io.jwt.decode(input.token)
+
+    # Allow managers to access any employee record
+    allow if {
+        token.realm_access.roles[_] == "manager"
+        startswith(input.path, "/api/v1/employees/")
     }
-    
-    has_permission if {
-        "manager" in user.realm_access.roles
+
+    # Allow employees to access only their own records
+    allow if {
+        token.realm_access.roles[_] == "employee"
+        startswith(input.path, "/api/v1/employees/")
+        employee_path_id := substring(input.path, 18, -1)  # Extract ID from "/api/v1/employees/{id}"
+        token.employee_id == employee_path_id
     }
-    
-    has_permission if {
-        "hr-staff" in user.realm_access.roles
-        not input.method == "DELETE"
-    }
-    
-    has_permission if {
-        "employee" in user.realm_access.roles
-        input.method == "GET"
-        path_parts := split(input.path, "/")
-        count(path_parts) >= 3
-        employee_path_id := path_parts[2]
-        user.employee_id == employee_path_id
+
+    # Allow access to employee list for managers
+    allow if {
+        token.realm_access.roles[_] == "manager"
+        input.path == "/api/v1/employees"
     }
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opa
-  namespace: opa-keycloak-practice
+  namespace: default
+  labels:
+    app: opa
 spec:
   replicas: 1
   selector:
@@ -61,18 +65,21 @@ spec:
         image: openpolicyagent/opa:latest-envoy
         ports:
         - containerPort: 8181
-        - containerPort: 9191
         args:
           - "run"
           - "--server"
           - "--addr=0.0.0.0:8181"
-          - "/policies/policy.rego"
+          - "/policies/employee-authz.rego"
         volumeMounts:
         - name: opa-policies
           mountPath: /policies
-        env:
-        - name: OPA_LOG_LEVEL
-          value: "debug"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
       volumes:
       - name: opa-policies
         configMap:
@@ -82,14 +89,13 @@ apiVersion: v1
 kind: Service
 metadata:
   name: opa-service
-  namespace: opa-keycloak-practice
+  namespace: default
+  labels:
+    app: opa
 spec:
   selector:
     app: opa
   ports:
-  - name: http
-    port: 8181
+  - port: 8181
     targetPort: 8181
-  - name: grpc
-    port: 9191
-    targetPort: 9191
+  type: ClusterIP
