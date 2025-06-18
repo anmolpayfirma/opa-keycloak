@@ -38,8 +38,7 @@ data:
         path_parts := split(input.path, "/")
         count(path_parts) >= 3
         employee_path_id := path_parts[2]
-        user.preferred_username == "bob.employee"
-        employee_path_id == "EMP003"
+        user.employee_id == employee_path_id
     }
 ---
 apiVersion: apps/v1
