@@ -1,97 +1,95 @@
 # OPA + Keycloak Authorization System
 
-A complete example of integrating Open Policy Agent (OPA) with Keycloak for REST API authorization in Kubernetes.
+A complete example of integrating Open Policy Agent (OPA) with Keycloak for REST API authorization in Kubernetes, deployed using Helm charts.
 
 ## Project Structure
 
 ```
 opa-keycloak/
 ├── apps/
-│   └── employee-api/          # Employee API application
-│       ├── app.py            # Python REST API
-│       ├── Dockerfile        # Docker build configuration
-│       ├── requirements.txt  # Python dependencies
-│       └── README.md         # API documentation
+│   ├── employee-api/          # Employee API application
+│   │   ├── app.py            # Python REST API
+│   │   ├── app-postgres.py   # PostgreSQL-enabled version
+│   │   ├── Dockerfile        # Docker build configuration
+│   │   └── requirements.txt  # Python dependencies
+│   └── auth-service/         # Authentication service
+│       ├── app.py           # JWT validation service
+│       ├── Dockerfile       # Docker build configuration
+│       └── requirements.txt # Python dependencies
+├── helm/
+│   └── opa-keycloak-postgres/ # Helm chart for complete deployment
+│       ├── Chart.yaml        # Chart metadata
+│       ├── values.yaml       # Configuration values
+│       └── templates/        # Kubernetes templates
 ├── k8s/
-│   └── manifests/            # Kubernetes manifests
-│       ├── employee-api.yaml # Employee API deployment
-│       ├── keycloak-deployment.yaml # Keycloak setup
-│       └── opa-policies.yaml # OPA policies and deployment
-├── scripts/                  # Build and deployment scripts
-│   ├── build.sh             # Build Docker image only
-│   ├── deploy.sh            # Deploy to Kubernetes only
-│   └── build-and-deploy.sh  # Build and deploy together
+│   └── system/              # System configuration (Docker compatibility)
+├── scripts/                 # Build and deployment scripts
+│   ├── helm-deploy-clean.sh # Main deployment script (recommended)
+│   ├── build-postgres-images.sh # Build Docker images
+│   ├── setup-keycloak.sh    # Keycloak configuration
+│   ├── setup-minikube-docker.sh # Docker setup for minikube
+│   └── test-*.sh           # Testing scripts
 └── docs/
-    └── OPA-Keycloak-Practice-Guide.md # Complete setup guide
+    ├── OPA-Keycloak-Practice-Guide.md # Complete setup guide
+    └── HELM-MIGRATION.md     # Migration guide from manifests to Helm
 ```
 
 ## Quick Start
 
 ### Prerequisites
 
-- Kubernetes cluster (minikube)
+- Kubernetes cluster (minikube recommended)
 - kubectl configured
+- Helm 3.x installed
 - Docker access to minikube
 - jq installed
 
-### 1. Setup Infrastructure
+### 1. Deploy Complete System
 
 ```bash
-# Create namespace
-kubectl create namespace opa-keycloak-practice
-kubectl config set-context --current --namespace=opa-keycloak-practice
+# Deploy everything with one command
+./scripts/helm-deploy-clean.sh
 
-# Deploy Keycloak and OPA
-kubectl apply -f k8s/manifests/keycloak-deployment.yaml
-kubectl apply -f k8s/manifests/opa-policies.yaml
-
-# Wait for services to be ready
-kubectl wait --for=condition=ready pod -l app=keycloak --timeout=300s
-kubectl wait --for=condition=ready pod -l app=opa --timeout=300s
+# This script will:
+# - Clean up any existing deployments
+# - Build Docker images
+# - Deploy using Helm chart
+# - Verify all services are running
 ```
 
 ### 2. Configure Keycloak
 
-Follow the detailed guide in `docs/OPA-Keycloak-Practice-Guide.md` to:
-- Create the `employee-management` realm
-- Configure users, roles, and client
-- Set up protocol mappers for JWT attributes
-
-### 3. Build and Deploy Employee API
-
 ```bash
-# For cloud minikube setup
-export MINIKUBE_IN_THE_CLOUD=y
-export SPOT_INSTANCE_DNS_NAME=your-instance-dns
-
-# Build and deploy
-./scripts/build-and-deploy.sh
-
-# Or separately
-./scripts/build.sh
-./scripts/deploy.sh
+# Configure Keycloak with users, roles, and client
+./scripts/setup-keycloak.sh
 ```
 
-### 4. Test the System
+### 3. Test the System
 
 ```bash
-# Port forward services
-kubectl port-forward service/keycloak-service 8082:8080 &
-kubectl port-forward service/employee-api-service 3000:80 &
+# Test CRUD operations
+./scripts/test-crud-operations.sh
 
-# Get tokens (replace client secret)
-export CLIENT_SECRET="your-client-secret"
-
-EMPLOYEE_TOKEN=$(curl -s -X POST \
-  http://localhost:8082/realms/employee-management/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=employee-api&client_secret=$CLIENT_SECRET&username=bob.employee&password=password123" \
-  | jq -r '.access_token')
-
-# Test authorization
-curl -H "Authorization: Bearer $EMPLOYEE_TOKEN" http://localhost:3000/employees/EMP003  # Should work
-curl -H "Authorization: Bearer $EMPLOYEE_TOKEN" http://localhost:3000/employees/EMP001  # Should fail
+# Test database operations
+./scripts/test-database-setup.sh
 ```
+
+## Architecture
+
+```
+Client Request → Kong Gateway → Employee API → PostgreSQL Database
+                       ↓              ↓
+                   OPA Service → Auth Service → Keycloak (JWT Validation)
+```
+
+## Key Components
+
+- **Employee API**: REST API with PostgreSQL backend
+- **Auth Service**: JWT token validation service
+- **Keycloak**: Identity and access management
+- **OPA**: Policy-based authorization
+- **Kong Gateway**: API gateway with rate limiting and routing
+- **PostgreSQL**: Database backend
 
 ## Authorization Rules
 
@@ -102,38 +100,36 @@ curl -H "Authorization: Bearer $EMPLOYEE_TOKEN" http://localhost:3000/employees/
 
 ## Development Workflow
 
-### Building Images
+### Full Deployment
 
 ```bash
-# Build latest version
-./scripts/build.sh
+# Clean deployment (recommended for development)
+./scripts/helm-deploy-clean.sh
 
-# Build specific version
-./scripts/build.sh v1.2.3
+# For cloud minikube
+export MINIKUBE_IN_THE_CLOUD=y
+export SPOT_INSTANCE_DNS_NAME=your-instance-dns
+./scripts/helm-deploy-clean.sh
 ```
 
-### Deploying
+### Building Images Only
 
 ```bash
-# Deploy latest
-./scripts/deploy.sh
-
-# Deploy specific version
-./scripts/deploy.sh v1.2.3
+# Build all Docker images
+./scripts/build-postgres-images.sh
 ```
 
-### Local Development
+### Configuration
 
-```bash
-# Run the API locally
-cd apps/employee-api
-pip install -r requirements.txt
-python app.py
-```
+Edit `helm/opa-keycloak-postgres/values.yaml` to customize:
+- Image tags and repositories
+- Resource limits
+- Database configuration
+- Service ports
 
 ## Cloud Minikube Setup
 
-The build scripts support cloud minikube deployments. Set these environment variables:
+For cloud deployments, set these environment variables:
 
 ```bash
 export MINIKUBE_IN_THE_CLOUD=y
@@ -141,49 +137,58 @@ export SPOT_INSTANCE_DNS_NAME=your-ec2-instance.compute.amazonaws.com
 export MINIKUBE_SSH_KEY=~/.config/cloudkube/minikube-ssh-key
 ```
 
-## Architecture
-
-```
-Client Request → Employee API → OPA Service → Policy Decision
-                       ↓
-                Keycloak Token Validation (JWT with custom attributes)
-```
-
 ## Key Features
 
-- ✅ JWT token-based authentication
-- ✅ Fine-grained authorization with OPA
-- ✅ Custom user attributes in JWT tokens
-- ✅ Proper Docker containerization
-- ✅ Kubernetes-native deployment
-- ✅ Health checks and monitoring
-- ✅ Security best practices (non-root containers)
+- ✅ **Helm-based deployment**: Single command deployment with proper lifecycle management
+- ✅ **PostgreSQL backend**: Persistent data storage
+- ✅ **JWT token-based authentication**: Secure token validation
+- ✅ **Fine-grained authorization**: Policy-based access control with OPA
+- ✅ **API Gateway**: Kong gateway with rate limiting and routing
+- ✅ **Health checks**: Comprehensive service monitoring
+- ✅ **Cloud-ready**: Supports both local and cloud minikube deployments
+- ✅ **Clean deployments**: Automatic cleanup and fresh deployments
 
 ## Troubleshooting
 
 ### Check Service Status
 ```bash
-kubectl get pods -n opa-keycloak-practice
-kubectl logs -l app=employee-api -n opa-keycloak-practice
+kubectl get pods -n opa-keycloak
+kubectl get services -n opa-keycloak
 ```
 
-### Test OPA Directly
+### View Logs
 ```bash
-kubectl port-forward service/opa-service 8181:8181 &
-curl -X POST http://localhost:8181/v1/data/system/authz/allow \
-  -H "Content-Type: application/json" \
-  -d '{"input": {"method": "GET", "path": "/employees/EMP001", "token": "your-jwt-token"}}'
+kubectl logs -l app=employee-api -n opa-keycloak
+kubectl logs -l app=keycloak -n opa-keycloak
+kubectl logs -l app=opa -n opa-keycloak
 ```
 
-### Verify Keycloak Configuration
-- Ensure protocol mappers are configured for `employee_id` and `department`
-- Check that users have the correct attributes and roles
-- Verify client secret matches the one used in API calls
+### Test Individual Services
+```bash
+# Port forward services for testing
+kubectl port-forward service/keycloak-service 8082:8080 -n opa-keycloak &
+kubectl port-forward service/employee-api-service 3000:80 -n opa-keycloak &
+kubectl port-forward service/opa-service 8181:8181 -n opa-keycloak &
+```
+
+### Database Issues
+```bash
+# Check database connection
+./scripts/test-database-clean.sh
+
+# Reset database
+kubectl delete pvc postgres-pvc -n opa-keycloak
+./scripts/helm-deploy-clean.sh
+```
+
+## Migration from Manifests
+
+If you're migrating from the old manifest-based deployment, see `HELM-MIGRATION.md` for detailed instructions.
 
 ## Contributing
 
-1. Make changes to the application code in `apps/employee-api/`
-2. Update Kubernetes manifests in `k8s/manifests/` if needed
-3. Test locally with `python apps/employee-api/app.py`
-4. Build and deploy with `./scripts/build-and-deploy.sh`
+1. Make changes to application code in `apps/`
+2. Update Helm chart in `helm/opa-keycloak-postgres/` if needed
+3. Test with `./scripts/helm-deploy-clean.sh`
+4. Run tests with `./scripts/test-crud-operations.sh`
 5. Commit changes and update documentation 
