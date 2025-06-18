@@ -1,0 +1,28 @@
+apiVersion: v2
+name: opa-keycloak-postgres
+description: A Helm chart for OPA + Keycloak authorization system with PostgreSQL database
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+
+keywords:
+  - opa
+  - keycloak
+  - postgresql
+  - authorization
+  - kong
+  - security
+
+home: https://github.com/your-org/opa-keycloak
+sources:
+  - https://github.com/your-org/opa-keycloak
+
+maintainers:
+  - name: Your Name
+    email: your.email@company.com
+
+dependencies: []
+
+annotations:
+  category: Security
+  licenses: Apache-2.0 

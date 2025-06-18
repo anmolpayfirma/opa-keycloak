@@ -1,0 +1,225 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-secret
+  namespace: {{ .Values.global.namespace }}
+type: Opaque
+data:
+  # Base64 encoded credentials
+  POSTGRES_USER: {{ .Values.postgresql.auth.postgresUser | b64enc }}
+  POSTGRES_PASSWORD: {{ .Values.postgresql.auth.postgresPassword | b64enc }}
+  POSTGRES_DB: {{ .Values.postgresql.auth.database | b64enc }}
+  # Keycloak database credentials
+  KEYCLOAK_DB_USER: {{ .Values.postgresql.auth.keycloakUser | b64enc }}
+  KEYCLOAK_DB_PASSWORD: {{ .Values.postgresql.auth.keycloakPassword | b64enc }}
+  KEYCLOAK_DB_NAME: {{ .Values.postgresql.auth.keycloakDatabase | b64enc }}
+  # Employee API database credentials
+  EMPLOYEE_API_DB_USER: {{ .Values.postgresql.auth.employeeApiUser | b64enc }}
+  EMPLOYEE_API_DB_PASSWORD: {{ .Values.postgresql.auth.employeeApiPassword | b64enc }}
+  EMPLOYEE_API_DB_NAME: {{ .Values.postgresql.auth.employeeApiDatabase | b64enc }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-init
+  namespace: {{ .Values.global.namespace }}
+data:
+  01-init-databases.sql: |
+    -- Create databases and users for our services
+    
+    -- Keycloak database
+    CREATE DATABASE {{ .Values.postgresql.auth.keycloakDatabase }};
+    CREATE USER {{ .Values.postgresql.auth.keycloakUser }} WITH ENCRYPTED PASSWORD '{{ .Values.postgresql.auth.keycloakPassword }}';
+    GRANT ALL PRIVILEGES ON DATABASE {{ .Values.postgresql.auth.keycloakDatabase }} TO {{ .Values.postgresql.auth.keycloakUser }};
+    ALTER DATABASE {{ .Values.postgresql.auth.keycloakDatabase }} OWNER TO {{ .Values.postgresql.auth.keycloakUser }};
+    
+    -- Employee API database  
+    CREATE DATABASE {{ .Values.postgresql.auth.employeeApiDatabase }};
+    CREATE USER {{ .Values.postgresql.auth.employeeApiUser }} WITH ENCRYPTED PASSWORD '{{ .Values.postgresql.auth.employeeApiPassword }}';
+    GRANT ALL PRIVILEGES ON DATABASE {{ .Values.postgresql.auth.employeeApiDatabase }} TO {{ .Values.postgresql.auth.employeeApiUser }};
+    ALTER DATABASE {{ .Values.postgresql.auth.employeeApiDatabase }} OWNER TO {{ .Values.postgresql.auth.employeeApiUser }};
+    
+  02-seed-employee-data.sql: |
+    -- Connect to employee_api database and create schema
+    \c {{ .Values.postgresql.auth.employeeApiDatabase }};
+    
+    -- Create employees table
+    CREATE TABLE IF NOT EXISTS employees (
+        id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        department VARCHAR(50) NOT NULL,
+        email VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Create departments table
+    CREATE TABLE IF NOT EXISTS departments (
+        id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(50) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Seed departments
+    INSERT INTO departments (id, name, description) VALUES 
+        ('ENG', 'Engineering', 'Software development and technical teams'),
+        ('MKT', 'Marketing', 'Marketing and brand management'),
+        ('MGT', 'Management', 'Leadership and executive team'),
+        ('HR', 'Human Resources', 'People operations and talent management')
+    ON CONFLICT (id) DO NOTHING;
+    
+    -- Seed employees
+    INSERT INTO employees (id, name, department, email) VALUES 
+        ('EMP001', 'John Doe', 'Engineering', 'john.doe@company.com'),
+        ('EMP002', 'Jane Smith', 'Marketing', 'jane.smith@company.com'),
+        ('EMP003', 'Bob Employee', 'Engineering', 'bob@company.com'),
+        ('MGR001', 'Alice Manager', 'Management', 'alice@company.com'),
+        ('EMP004', 'Sarah Developer', 'Engineering', 'sarah.dev@company.com'),
+        ('EMP005', 'Mike Sales', 'Marketing', 'mike.sales@company.com')
+    ON CONFLICT (id) DO NOTHING;
+    
+    -- Grant permissions to employee_api user
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ .Values.postgresql.auth.employeeApiUser }};
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ .Values.postgresql.auth.employeeApiUser }};
+---
+{{- if .Values.postgresql.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-pvc
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.persistence.size }}
+  {{- if .Values.postgresql.persistence.storageClass }}
+  storageClassName: {{ .Values.postgresql.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: postgresql
+    chart: {{ include "opa-keycloak-postgres.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: postgresql
+        release: {{ .Release.Name }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: postgresql
+        image: {{ .Values.postgresql.image }}
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        {{- if .Values.postgresql.persistence.enabled }}
+        - name: postgresql-storage
+          mountPath: /var/lib/postgresql/data
+        {{- end }}
+        - name: postgresql-init
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          {{- toYaml .Values.postgresql.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - {{ .Values.postgresql.auth.postgresUser }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - {{ .Values.postgresql.auth.postgresUser }}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      {{- if .Values.postgresql.persistence.enabled }}
+      - name: postgresql-storage
+        persistentVolumeClaim:
+          claimName: postgresql-pvc
+      {{- end }}
+      - name: postgresql-init
+        configMap:
+          name: postgresql-init
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: postgresql
+    chart: {{ include "opa-keycloak-postgres.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  selector:
+    app: postgresql
+    release: {{ .Release.Name }}
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  type: {{ .Values.postgresql.service.type | default "ClusterIP" }}
+{{- end }} 

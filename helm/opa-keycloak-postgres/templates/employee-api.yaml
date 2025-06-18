@@ -1,0 +1,112 @@
+{{- if .Values.employeeApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-api
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: employee-api
+    chart: {{ include "opa-keycloak-postgres.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    version: postgres
+spec:
+  replicas: {{ .Values.employeeApi.replicas }}
+  selector:
+    matchLabels:
+      app: employee-api
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: employee-api
+        release: {{ .Release.Name }}
+        version: postgres
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: employee-api
+        image: {{ .Values.employeeApi.image }}
+        imagePullPolicy: {{ .Values.employeeApi.imagePullPolicy | default "IfNotPresent" }}
+        ports:
+        - containerPort: {{ .Values.employeeApi.service.port }}
+          name: http
+        env:
+        - name: PORT
+          value: "{{ .Values.employeeApi.service.port }}"
+        - name: APP_VERSION
+          value: "{{ .Chart.AppVersion }}"
+        - name: DB_HOST
+          value: "{{ .Values.employeeApi.database.host }}"
+        - name: DB_PORT
+          value: "{{ .Values.employeeApi.database.port }}"
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: EMPLOYEE_API_DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: EMPLOYEE_API_DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: EMPLOYEE_API_DB_PASSWORD
+        resources:
+          {{- toYaml .Values.employeeApi.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.employeeApi.service.port }}
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.employeeApi.service.port }}
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-api-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: employee-api
+    chart: {{ include "opa-keycloak-postgres.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  selector:
+    app: employee-api
+    release: {{ .Release.Name }}
+  ports:
+  - port: {{ .Values.employeeApi.service.port }}
+    targetPort: {{ .Values.employeeApi.service.port }}
+    protocol: TCP
+    name: http
+  type: {{ .Values.employeeApi.service.type | default "ClusterIP" }}
+{{- end }} 
