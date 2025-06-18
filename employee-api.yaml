@@ -1,0 +1,109 @@
+# employee-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-api
+  namespace: opa-keycloak-practice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: employee-api
+  template:
+    metadata:
+      labels:
+        app: employee-api
+    spec:
+      containers:
+      - name: employee-api
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: api-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+        - name: api-content
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: api-config
+        configMap:
+          name: api-config
+      - name: api-content
+        configMap:
+          name: api-content
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: opa-keycloak-practice
+data:
+  nginx.conf: |
+    upstream opa_backend {
+        server opa-service.opa-keycloak-practice.svc.cluster.local:8181;
+    }
+    
+    server {
+        listen 80;
+        
+        location /auth {
+            internal;
+            proxy_pass http://opa_backend/v1/data/system/authz/allow;
+            proxy_method POST;
+            proxy_set_header Content-Type application/json;
+            # Extract token without Bearer prefix
+            set $token "";
+            if ($http_authorization ~ "Bearer (.+)") {
+                set $token $1;
+            }
+            proxy_set_body "{\"input\":{\"method\":\"$request_method\",\"path\":\"$request_uri\",\"token\":\"$token\"}}";
+        }
+        
+        location /employees {
+            auth_request /auth;
+            # This should work if auth returns proper status
+            error_page 401 403 = @denied;
+            return 200 "{\"employees\": [{\"id\": \"EMP001\", \"name\": \"John Manager\"}, {\"id\": \"EMP002\", \"name\": \"Jane HR\"}, {\"id\": \"EMP003\", \"name\": \"Bob Employee\"}]}";
+            add_header Content-Type application/json;
+        }
+        
+        location @denied {
+            return 403 "{\"error\": \"Access denied\"}";
+            add_header Content-Type application/json;
+        }
+        
+        location / {
+            return 200 "Employee API Server Running";
+            add_header Content-Type text/plain;
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-content
+  namespace: opa-keycloak-practice
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head><title>Employee API</title></head>
+    <body>
+        <h1>Employee Management API</h1>
+        <p>Protected by OPA + Keycloak</p>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-api-service
+  namespace: opa-keycloak-practice
+spec:
+  selector:
+    app: employee-api
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
