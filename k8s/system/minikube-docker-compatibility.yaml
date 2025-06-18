@@ -1,0 +1,239 @@
+---
+# Minikube Docker Compatibility Setup
+# This enables Docker commands to work with containerd in minikube
+# Run once: kubectl apply -f k8s/system/minikube-docker-compatibility.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minikube-system
+  labels:
+    name: minikube-system
+    purpose: docker-compatibility
+
+---
+# Job 1: Install nerdctl and nerdctld binaries (one-time)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: install-docker-compatibility-tools
+  namespace: minikube-system
+  labels:
+    app: docker-compatibility
+    component: installer
+spec:
+  template:
+    metadata:
+      labels:
+        app: docker-compatibility
+        component: installer
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: installer
+        image: alpine:latest
+        command: ["/bin/sh"]
+        args: 
+        - "-c"
+        - |
+          set -e
+          echo "Installing Docker compatibility tools..."
+          
+          # Check if already installed
+          if [ -e /mnt/usr/local/bin/nerdctl ] && [ -e /mnt/usr/local/bin/nerdctld ]; then
+            echo "Tools already installed, skipping..."
+            exit 0
+          fi
+          
+          cd /tmp
+          
+          # Install nerdctld (Docker API compatibility)
+          echo "Downloading nerdctld..."
+          wget -q https://github.com/afbjorklund/nerdctld/releases/download/v0.5.1/nerdctld-0.5.1-linux-amd64.tar.gz
+          tar zxf nerdctld-0.5.1-linux-amd64.tar.gz
+          cp nerdctld /mnt/usr/local/bin/
+          
+          # Install nerdctl (Docker CLI compatibility)
+          echo "Downloading nerdctl..."
+          wget -q https://github.com/containerd/nerdctl/releases/download/v1.7.3/nerdctl-1.7.3-linux-amd64.tar.gz
+          tar zxf nerdctl-1.7.3-linux-amd64.tar.gz
+          cp nerdctl /mnt/usr/local/bin/
+          
+          chmod +x /mnt/usr/local/bin/nerdctl /mnt/usr/local/bin/nerdctld
+          echo "Installation complete!"
+        securityContext: 
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+        - name: host-volume
+          mountPath: /mnt
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: host-volume
+        hostPath:
+          path: /
+
+---
+# Job 2: Replace docker binary with compatibility script (one-time)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: replace-docker-binary
+  namespace: minikube-system
+  labels:
+    app: docker-compatibility
+    component: docker-replacer
+spec:
+  template:
+    metadata:
+      labels:
+        app: docker-compatibility
+        component: docker-replacer
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: docker-replacer
+        image: alpine:latest
+        command: ["/bin/sh"]
+        args:
+        - "-c" 
+        - |
+          set -e
+          echo "Setting up Docker compatibility..."
+          
+          # Check if already replaced
+          if [ "$(dd if=/mnt/usr/bin/docker bs=1 count=9 2>/dev/null || echo '')" = "#!/bin/sh" ]; then
+            echo "Docker binary already replaced, skipping..."
+            exit 0
+          fi
+          
+          # Backup original docker binary
+          if [ -f /mnt/usr/bin/docker ]; then
+            echo "Backing up original docker binary..."
+            cp /mnt/usr/bin/docker /mnt/usr/bin/docker.orig
+          fi
+          
+          # Replace with compatibility script
+          echo "Installing Docker compatibility script..."
+          cp /docker-script/docker-wrapper.sh /mnt/usr/bin/docker
+          chmod 755 /mnt/usr/bin/docker
+          echo "Docker binary replacement complete!"
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+        - name: host-volume
+          mountPath: /mnt
+        - name: docker-script
+          mountPath: /docker-script
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+      volumes:
+      - name: host-volume
+        hostPath:
+          path: /
+      - name: docker-script
+        configMap:
+          name: docker-compatibility-script
+          defaultMode: 0755
+
+---
+# Persistent daemon: nerdctld (Docker API server)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nerdctld-daemon
+  namespace: minikube-system
+  labels:
+    app: docker-compatibility
+    component: daemon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-compatibility
+      component: daemon
+  template:
+    metadata:
+      labels:
+        app: docker-compatibility
+        component: daemon
+    spec:
+      containers:
+      - name: nerdctld
+        image: alpine:latest
+        command: ["/usr/sbin/chroot"]
+        args: 
+        - "/mnt"
+        - "/bin/sh"
+        - "-c"
+        - |
+          echo "Starting nerdctld daemon..."
+          rm -f /tmp/nerdctl.sock
+          exec env CONTAINERD_NAMESPACE=k8s.io /usr/local/bin/nerdctld --socket /tmp/nerdctl.sock
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: true
+        volumeMounts:
+        - name: host-volume
+          mountPath: /mnt
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - "/usr/sbin/chroot"
+            - "/mnt"
+            - "/bin/sh"
+            - "-c"
+            - "test -S /tmp/nerdctl.sock"
+          initialDelaySeconds: 10
+          periodSeconds: 30
+      volumes:
+      - name: host-volume
+        hostPath:
+          path: /
+  strategy:
+    type: Recreate
+
+---
+# Docker compatibility script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docker-compatibility-script
+  namespace: minikube-system
+  labels:
+    app: docker-compatibility
+data:
+  docker-wrapper.sh: |
+    #!/bin/sh
+    # Docker-to-nerdctl compatibility wrapper for minikube
+    # This script makes 'docker' commands work with containerd
+    
+    export CONTAINERD_NAMESPACE=k8s.io
+    
+    # Handle Docker daemon socket connections (for build contexts)
+    if [ "$1" = "system" ] && [ "$2" = "dial-stdio" ]; then
+      exec sudo socat - "/tmp/nerdctl.sock"
+    fi
+    
+    # Forward all other commands to nerdctl
+    exec sudo nerdctl -n k8s.io "$@" 
