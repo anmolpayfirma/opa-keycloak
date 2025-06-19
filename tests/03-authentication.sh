@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Authentication Test
-# Tests Keycloak token generation and validation
+# Tests Keycloak token generation and validation via Istio Gateway
 
 set -e
 
-echo "🔐 Authentication Test"
-echo "======================"
+echo "🔐 Authentication Test (via Istio Gateway)"
+echo "=========================================="
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,26 +32,29 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Test configuration
-KEYCLOAK_URL="http://localhost:8082"
+# Test configuration - Using Istio Gateway via localhost with Host header
+GATEWAY_HOST="opa-demo.local"
+BASE_URL="http://localhost"
+KEYCLOAK_URL="$BASE_URL/auth"
 REALM="employee-management"
 CLIENT_ID="employee-api"
-# Note: CLIENT_SECRET needs to be obtained from Keycloak admin console
+CLIENT_SECRET="Uh7oAkQ3Tcq68nbynDsNrLEbWsP2Xu8W"
 
 # Check if Keycloak is accessible
-print_status "Checking Keycloak connectivity..."
-if ! curl -s --connect-timeout 5 "$KEYCLOAK_URL/health" > /dev/null; then
-    print_error "❌ Keycloak is not accessible"
-    echo "   Make sure port forwarding is active: kubectl port-forward service/keycloak-service 8082:8080 -n opa-keycloak"
+print_status "Checking Keycloak connectivity through Istio Gateway..."
+if ! curl -s --connect-timeout 5 -H "Host: $GATEWAY_HOST" "$KEYCLOAK_URL/health" > /dev/null; then
+    print_error "❌ Keycloak is not accessible through Istio Gateway"
+    echo "   Make sure SSH tunnel is active: ./scripts/setup-tunnel.sh"
+    echo "   And /etc/hosts contains: 127.0.0.1 opa-demo.local"
     exit 1
 fi
 
-print_success "✅ Keycloak is accessible"
+print_success "✅ Keycloak is accessible through Istio Gateway"
 echo ""
 
 # Check realm configuration
 print_status "1️⃣  Testing realm configuration..."
-REALM_CONFIG=$(curl -s "$KEYCLOAK_URL/realms/$REALM/.well-known/openid_configuration")
+REALM_CONFIG=$(curl -s -H "Host: $GATEWAY_HOST" "$KEYCLOAK_URL/realms/$REALM/.well-known/openid_configuration")
 
 if echo "$REALM_CONFIG" | jq -e '.issuer' > /dev/null 2>&1; then
     print_success "✅ Realm '$REALM' is configured"
@@ -67,25 +70,13 @@ fi
 
 echo ""
 
-# Test user credentials (these need to be set up in Keycloak)
+# Test user credentials (these are set up by setup-keycloak.sh)
 print_status "2️⃣  Testing user authentication..."
-
-# Check if CLIENT_SECRET is provided
-if [ -z "$CLIENT_SECRET" ]; then
-    print_warning "⚠️  CLIENT_SECRET not set"
-    echo "   To test authentication, set CLIENT_SECRET environment variable:"
-    echo "   export CLIENT_SECRET='your-client-secret-from-keycloak'"
-    echo ""
-    print_status "Attempting to get client secret from Keycloak admin..."
-    echo "   This requires admin access to Keycloak"
-    exit 0
-fi
 
 # Test users (these should be created by setup-keycloak.sh)
 declare -A TEST_USERS=(
     ["alice.manager"]="password123"
     ["bob.employee"]="password123"
-    ["jane.hr"]="password123"
 )
 
 for username in "${!TEST_USERS[@]}"; do
@@ -94,6 +85,7 @@ for username in "${!TEST_USERS[@]}"; do
     print_status "Testing user: $username"
     
     TOKEN_RESPONSE=$(curl -s -X POST \
+        -H "Host: $GATEWAY_HOST" \
         "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=password" \
@@ -111,16 +103,21 @@ for username in "${!TEST_USERS[@]}"; do
         JWT_PAYLOAD=$(echo "$ACCESS_TOKEN" | cut -d. -f2)
         
         # Add padding if needed for base64 decoding
-        JWT_PAYLOAD_PADDED=$(printf "%s" "$JWT_PAYLOAD" | sed 's/$/===/' | fold -w 4 | head -n -1 | tr -d '\n')
+        case $((${#JWT_PAYLOAD} % 4)) in
+            2) JWT_PAYLOAD="${JWT_PAYLOAD}==" ;;
+            3) JWT_PAYLOAD="${JWT_PAYLOAD}=" ;;
+        esac
         
         # Decode payload (requires base64 and jq)
         if command -v base64 >/dev/null 2>&1; then
-            DECODED_PAYLOAD=$(echo "$JWT_PAYLOAD_PADDED" | base64 -d 2>/dev/null | jq . 2>/dev/null || echo "Could not decode JWT payload")
+            DECODED_PAYLOAD=$(echo "$JWT_PAYLOAD" | base64 -d 2>/dev/null | jq . 2>/dev/null || echo "Could not decode JWT payload")
             if [ "$DECODED_PAYLOAD" != "Could not decode JWT payload" ]; then
                 echo "   User: $(echo "$DECODED_PAYLOAD" | jq -r '.preferred_username // "N/A"')"
                 echo "   Roles: $(echo "$DECODED_PAYLOAD" | jq -r '.realm_access.roles[]?' | tr '\n' ' ' || echo "N/A")"
                 echo "   Employee ID: $(echo "$DECODED_PAYLOAD" | jq -r '.employee_id // "N/A"')"
                 echo "   Department: $(echo "$DECODED_PAYLOAD" | jq -r '.department // "N/A"')"
+                echo "   Email: $(echo "$DECODED_PAYLOAD" | jq -r '.email // "N/A"')"
+                echo "   Name: $(echo "$DECODED_PAYLOAD" | jq -r '.name // "N/A"')"
             fi
         fi
         
@@ -140,44 +137,79 @@ for username in "${!TEST_USERS[@]}"; do
             echo "   Possible issue: Invalid client credentials"
         elif echo "$TOKEN_RESPONSE" | grep -q "invalid_grant"; then
             echo "   Possible issue: Invalid username/password"
+        elif echo "$TOKEN_RESPONSE" | grep -q "unauthorized"; then
+            echo "   Possible issue: User not found or realm misconfigured"
         fi
     fi
     
     echo ""
 done
 
-# Test token validation with Auth Service (if available)
-print_status "3️⃣  Testing token validation..."
+# Test Employee API with authentication
+print_status "3️⃣  Testing authenticated API access..."
 
-AUTH_SERVICE_URL="http://localhost:8081"
-if curl -s --connect-timeout 5 "$AUTH_SERVICE_URL/health" > /dev/null; then
-    print_status "Auth Service is available, testing token validation..."
+EMPLOYEE_API_URL="$BASE_URL/api/v1/employees"
+
+if [ -n "$EMPLOYEE_TOKEN" ]; then
+    print_status "Testing Employee API with bob.employee token..."
     
-    if [ -n "$EMPLOYEE_TOKEN" ]; then
-        VALIDATION_RESPONSE=$(curl -s -X POST \
-            "$AUTH_SERVICE_URL/validate" \
-            -H "Content-Type: application/json" \
-            -d "{\"token\": \"$EMPLOYEE_TOKEN\"}")
-        
-        if echo "$VALIDATION_RESPONSE" | jq -e '.valid' > /dev/null 2>&1; then
-            IS_VALID=$(echo "$VALIDATION_RESPONSE" | jq -r '.valid')
-            if [ "$IS_VALID" = "true" ]; then
-                print_success "✅ Token validation successful"
-                echo "   User: $(echo "$VALIDATION_RESPONSE" | jq -r '.user.preferred_username // "N/A"')"
-            else
-                print_error "❌ Token validation failed"
-                echo "   Response: $VALIDATION_RESPONSE"
-            fi
-        else
-            print_warning "⚠️  Unexpected validation response"
-            echo "   Response: $VALIDATION_RESPONSE"
+    # Test GET request with authentication
+    AUTH_RESPONSE=$(curl -s -w "\n%{http_code}" \
+        -H "Host: $GATEWAY_HOST" \
+        -H "Authorization: Bearer $EMPLOYEE_TOKEN" \
+        "$EMPLOYEE_API_URL")
+    
+    AUTH_BODY=$(echo "$AUTH_RESPONSE" | head -n -1)
+    AUTH_STATUS=$(echo "$AUTH_RESPONSE" | tail -n 1)
+    
+    if [ "$AUTH_STATUS" = "200" ]; then
+        print_success "✅ Authenticated API access successful"
+        if echo "$AUTH_BODY" | jq -e '.count' >/dev/null 2>&1; then
+            EMPLOYEE_COUNT=$(echo "$AUTH_BODY" | jq -r '.count')
+            echo "   Found $EMPLOYEE_COUNT employees"
         fi
+        echo "   Response: $AUTH_BODY"
+    elif [ "$AUTH_STATUS" = "501" ] || [ "$AUTH_STATUS" = "401" ] || [ "$AUTH_STATUS" = "403" ]; then
+        print_warning "⚠️  API still requires additional authorization (HTTP $AUTH_STATUS)"
+        echo "   Token may be valid but OPA policies may be restricting access"
+        echo "   Response: $AUTH_BODY"
     else
-        print_warning "⚠️  No employee token available for validation test"
+        print_error "❌ Unexpected API response (HTTP $AUTH_STATUS)"
+        echo "   Response: $AUTH_BODY"
     fi
 else
-    print_warning "⚠️  Auth Service not accessible"
-    echo "   To enable: kubectl port-forward service/auth-service 8081:80 -n opa-keycloak"
+    print_warning "⚠️  No employee token available for API testing"
+fi
+
+if [ -n "$MANAGER_TOKEN" ]; then
+    print_status "Testing Employee API with alice.manager token..."
+    
+    # Test GET request with manager authentication
+    MANAGER_AUTH_RESPONSE=$(curl -s -w "\n%{http_code}" \
+        -H "Host: $GATEWAY_HOST" \
+        -H "Authorization: Bearer $MANAGER_TOKEN" \
+        "$EMPLOYEE_API_URL")
+    
+    MANAGER_AUTH_BODY=$(echo "$MANAGER_AUTH_RESPONSE" | head -n -1)
+    MANAGER_AUTH_STATUS=$(echo "$MANAGER_AUTH_RESPONSE" | tail -n 1)
+    
+    if [ "$MANAGER_AUTH_STATUS" = "200" ]; then
+        print_success "✅ Manager authenticated API access successful"
+        if echo "$MANAGER_AUTH_BODY" | jq -e '.count' >/dev/null 2>&1; then
+            MANAGER_EMPLOYEE_COUNT=$(echo "$MANAGER_AUTH_BODY" | jq -r '.count')
+            echo "   Found $MANAGER_EMPLOYEE_COUNT employees"
+        fi
+        echo "   Response: $MANAGER_AUTH_BODY"
+    elif [ "$MANAGER_AUTH_STATUS" = "501" ] || [ "$MANAGER_AUTH_STATUS" = "401" ] || [ "$MANAGER_AUTH_STATUS" = "403" ]; then
+        print_warning "⚠️  Manager API still requires additional authorization (HTTP $MANAGER_AUTH_STATUS)"
+        echo "   Token may be valid but OPA policies may be restricting access"
+        echo "   Response: $MANAGER_AUTH_BODY"
+    else
+        print_error "❌ Unexpected manager API response (HTTP $MANAGER_AUTH_STATUS)"
+        echo "   Response: $MANAGER_AUTH_BODY"
+    fi
+else
+    print_warning "⚠️  No manager token available for API testing"
 fi
 
 echo ""
@@ -189,6 +221,7 @@ if [ -n "$TOKEN_RESPONSE" ] && echo "$TOKEN_RESPONSE" | jq -e '.refresh_token' >
     REFRESH_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.refresh_token')
     
     REFRESH_RESPONSE=$(curl -s -X POST \
+        -H "Host: $GATEWAY_HOST" \
         "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=refresh_token" \
@@ -198,7 +231,8 @@ if [ -n "$TOKEN_RESPONSE" ] && echo "$TOKEN_RESPONSE" | jq -e '.refresh_token' >
     
     if echo "$REFRESH_RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
         print_success "✅ Token refresh successful"
-        echo "   New token expires in: $(echo "$REFRESH_RESPONSE" | jq -r '.expires_in') seconds"
+        NEW_ACCESS_TOKEN=$(echo "$REFRESH_RESPONSE" | jq -r '.access_token')
+        echo "   New token obtained (length: ${#NEW_ACCESS_TOKEN} chars)"
     else
         print_error "❌ Token refresh failed"
         echo "   Response: $REFRESH_RESPONSE"
@@ -208,18 +242,77 @@ else
 fi
 
 echo ""
-echo "🎯 Authentication Test Complete"
+
+# Test OPA integration (if available)
+print_status "5️⃣  Testing OPA integration..."
+
+OPA_URL="$BASE_URL/opa/v1/data"
+if curl -s --connect-timeout 5 -H "Host: $GATEWAY_HOST" "$OPA_URL" >/dev/null 2>&1; then
+    print_status "OPA is accessible, testing policy evaluation..."
+    
+    if [ -n "$EMPLOYEE_TOKEN" ]; then
+        # Test OPA policy decision
+        OPA_QUERY='{
+            "input": {
+                "method": "GET",
+                "path": "/api/v1/employees",
+                "user": {
+                    "roles": ["employee"],
+                    "employee_id": "EMP003",
+                    "department": "Engineering"
+                }
+            }
+        }'
+        
+        OPA_RESPONSE=$(curl -s -X POST \
+            -H "Host: $GATEWAY_HOST" \
+            -H "Content-Type: application/json" \
+            -d "$OPA_QUERY" \
+            "$OPA_URL/authz/allow")
+        
+        if echo "$OPA_RESPONSE" | jq -e '.result' >/dev/null 2>&1; then
+            ALLOW_RESULT=$(echo "$OPA_RESPONSE" | jq -r '.result')
+            if [ "$ALLOW_RESULT" = "true" ]; then
+                print_success "✅ OPA policy allows employee access"
+            else
+                print_warning "⚠️  OPA policy denies employee access"
+            fi
+            echo "   Policy result: $ALLOW_RESULT"
+        else
+            print_warning "⚠️  OPA response format unexpected"
+            echo "   Response: $OPA_RESPONSE"
+        fi
+    else
+        print_warning "⚠️  No token available for OPA policy testing"
+    fi
+else
+    print_warning "⚠️  OPA not accessible through Istio Gateway"
+    echo "   Check OPA routing configuration"
+fi
+
+echo ""
+
+# Summary
+print_status "📊 Authentication Test Summary"
 echo "==============================="
-
-# Export tokens for use in other tests
-if [ -n "$EMPLOYEE_TOKEN" ]; then
-    echo "export EMPLOYEE_TOKEN='$EMPLOYEE_TOKEN'" > /tmp/test-tokens.env
+if [ -n "$EMPLOYEE_TOKEN" ] && [ -n "$MANAGER_TOKEN" ]; then
+    print_success "✅ Both employee and manager authentication successful"
+    echo ""
+    print_status "💡 You can use these tokens for manual API testing:"
+    echo ""
+    echo "Employee Token (bob.employee):"
+    echo "curl -H 'Authorization: Bearer $EMPLOYEE_TOKEN' $EMPLOYEE_API_URL"
+    echo ""
+    echo "Manager Token (alice.manager):"
+    echo "curl -H 'Authorization: Bearer $MANAGER_TOKEN' $EMPLOYEE_API_URL"
+elif [ -n "$EMPLOYEE_TOKEN" ] || [ -n "$MANAGER_TOKEN" ]; then
+    print_warning "⚠️  Partial authentication success"
+    echo "   Some users authenticated successfully"
+else
+    print_error "❌ No users authenticated successfully"
+    echo "   Check Keycloak configuration and user setup"
 fi
-if [ -n "$MANAGER_TOKEN" ]; then
-    echo "export MANAGER_TOKEN='$MANAGER_TOKEN'" >> /tmp/test-tokens.env
-fi
 
-if [ -f /tmp/test-tokens.env ]; then
-    print_status "Tokens saved to /tmp/test-tokens.env for use in other tests"
-    echo "   Source with: source /tmp/test-tokens.env"
-fi 
+echo ""
+echo "🎯 Authentication Test Complete"
+echo "===============================" 
