@@ -32,11 +32,17 @@ spec:
         - start-dev
         - --hostname-strict=false
         - --hostname-strict-https=false
+        - --proxy=edge
+        - --http-relative-path=/auth
         env:
         - name: KEYCLOAK_ADMIN
           value: {{ .Values.keycloak.admin.username }}
         - name: KEYCLOAK_ADMIN_PASSWORD
           value: {{ .Values.keycloak.admin.password }}
+        - name: KC_HOSTNAME
+          value: {{ .Values.global.domain }}
+        - name: KC_HTTP_RELATIVE_PATH
+          value: /auth
         - name: KC_DB
           value: postgres
         - name: KC_DB_URL
@@ -62,13 +68,13 @@ spec:
           {{- toYaml .Values.keycloak.resources | nindent 10 }}
         livenessProbe:
           httpGet:
-            path: /health/live
+            path: /auth/health/live
             port: 8080
           initialDelaySeconds: 90
           periodSeconds: 30
         readinessProbe:
           httpGet:
-            path: /health/ready
+            path: /auth/health/ready
             port: 8080
           initialDelaySeconds: 60
           periodSeconds: 10

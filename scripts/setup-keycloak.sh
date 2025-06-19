@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Setup Keycloak with employee-management realm, users, and client
-# This script configures Keycloak through Kong Gateway
+# This script configures Keycloak through Istio Gateway
 
 set -e
 

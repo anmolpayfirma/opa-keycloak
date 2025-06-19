@@ -48,14 +48,21 @@ opa-keycloak/
 ### 1. Deploy Complete System
 
 ```bash
-# Deploy everything with one command
-./scripts/helm-deploy-clean.sh
+# Deploy everything with Istio service mesh (installs Istio automatically)
+./scripts/helm-deploy-istio.sh
 
 # This script will:
+# - Install Istio if not already present
 # - Clean up any existing deployments
 # - Build Docker images
-# - Deploy using Helm chart
+# - Deploy using Helm chart with Istio
 # - Verify all services are running
+
+# Manual Istio installation using Helm (optional)
+./scripts/install-istio.sh
+
+# Alternative: Use the legacy deployment script
+./scripts/helm-deploy-clean.sh
 ```
 
 ### 2. Configure Keycloak
@@ -78,7 +85,7 @@ opa-keycloak/
 ## Architecture
 
 ```
-Client Request → Kong Gateway → Employee API → PostgreSQL Database
+Client Request → Istio Gateway → Employee API → PostgreSQL Database
                        ↓              ↓
                    OPA Service → Auth Service → Keycloak (JWT Validation)
 ```
@@ -89,7 +96,7 @@ Client Request → Kong Gateway → Employee API → PostgreSQL Database
 - **Auth Service**: JWT token validation service
 - **Keycloak**: Identity and access management
 - **OPA**: Policy-based authorization
-- **Kong Gateway**: API gateway with rate limiting and routing
+- **Istio Gateway**: Service mesh with advanced traffic management
 - **PostgreSQL**: Database backend
 
 ## Authorization Rules
@@ -144,7 +151,7 @@ export MINIKUBE_SSH_KEY=~/.config/cloudkube/minikube-ssh-key
 - ✅ **PostgreSQL backend**: Persistent data storage
 - ✅ **JWT token-based authentication**: Secure token validation
 - ✅ **Fine-grained authorization**: Policy-based access control with OPA
-- ✅ **API Gateway**: Kong gateway with rate limiting and routing
+- ✅ **Service Mesh**: Istio gateway with advanced traffic management and security
 - ✅ **Health checks**: Comprehensive service monitoring
 - ✅ **Cloud-ready**: Supports both local and cloud minikube deployments
 - ✅ **Clean deployments**: Automatic cleanup and fresh deployments
