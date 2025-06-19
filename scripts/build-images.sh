@@ -78,28 +78,28 @@ print_success "Employee API image built"
 
 cd ../..
 
-# Build Merchant Service
-print_status "Building Merchant Service..."
-cd apps/merchant-service
+# Build Merchant API
+print_status "Building Merchant API..."
+cd apps/merchant-api
 
 if [ ! -f "Dockerfile" ]; then
-    print_error "Dockerfile not found in apps/merchant-service/"
+    print_error "Dockerfile not found in apps/merchant-api/"
     exit 1
 fi
 
 if [ ! -f "pom.xml" ]; then
-    print_error "pom.xml not found in apps/merchant-service/"
+    print_error "pom.xml not found in apps/merchant-api/"
     exit 1
 fi
 
-print_status "Building ${REGISTRY}/merchant-service:latest..."
+print_status "Building ${REGISTRY}/merchant-api:latest..."
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -t ${REGISTRY}/merchant-service:latest .
+    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -t ${REGISTRY}/merchant-api:latest .
 else
-    docker build -t ${REGISTRY}/merchant-service:latest .
-    docker push ${REGISTRY}/merchant-service:latest
+    docker build -t ${REGISTRY}/merchant-api:latest .
+    docker push ${REGISTRY}/merchant-api:latest
 fi
-print_success "Merchant Service image built"
+print_success "Merchant API image built"
 
 cd ../..
 
@@ -118,9 +118,9 @@ print_status "Verifying built images..."
 echo ""
 print_status "Available images in minikube registry:"
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 images | grep -E "employee-api|merchant-service" || print_warning "No matching images found"
+    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 images | grep -E "employee-api|merchant-api" || print_warning "No matching images found"
 else
-    docker images | grep -E "employee-api|merchant-service" || print_warning "No matching images found"
+    docker images | grep -E "employee-api|merchant-api" || print_warning "No matching images found"
 fi
 
 echo ""
@@ -128,7 +128,7 @@ print_success "🎉 Docker images built successfully!"
 echo ""
 print_status "Built images:"
 echo "  📦 ${REGISTRY}/employee-api:v2.0.0"
-echo "  📦 ${REGISTRY}/merchant-service:latest"
+echo "  📦 ${REGISTRY}/merchant-api:latest"
 echo ""
 print_status "ℹ️  Auth-service replaced by Istio OPA external authorization"
 echo ""

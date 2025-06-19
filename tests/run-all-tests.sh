@@ -108,7 +108,7 @@ TESTS=(
     "01-basic-connectivity.sh"
     "02-employee-crud.sh"
     "03-authentication.sh"
-    "05-merchant-service.sh"
+    "05-merchant-api.sh"
 )
 
 PASSED=0

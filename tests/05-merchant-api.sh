@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# UmerchantUservice API Test
-# Tests merchant-service integration with Istio Gateway and OPA authorization
+# Merchant API Test
+# Tests merchant-api integration with Istio Gateway and OPA authorization
 
 set -e
 
-echo "🔧 UmerchantUservice API Test (via Istio Gateway)"
+echo "🔧 Merchant API Test (via Istio Gateway)"
 echo "=================================================="
 
 # Colors for output
@@ -31,15 +31,15 @@ print_error() {
 GATEWAY_HOST="opa-demo.local"
 BASE_URL="http://localhost"
 API_URL="$BASE_URL/api/v1/merchants"
-HEALTH_URL="$BASE_URL/merchant-health"
+HEALTH_URL="$BASE_URL/api/v1/merchants/health"
 
 # Check if API is accessible
-print_status "Checking merchant-service health endpoint..."
+print_status "Checking merchant-api health endpoint..."
 if curl -s --connect-timeout 5 -H "Host: $GATEWAY_HOST" "$HEALTH_URL" > /dev/null; then
-    print_success "✅ UmerchantUservice health endpoint is accessible"
+    print_success "✅ Merchant API health endpoint is accessible"
 else
-    print_error "❌ UmerchantUservice health endpoint not accessible"
-    echo "   Make sure merchant-service is deployed and SSH tunnel is active"
+    print_error "❌ Merchant API health endpoint not accessible"
+    echo "   Make sure merchant-api is deployed and SSH tunnel is active"
     exit 1
 fi
 
@@ -98,10 +98,10 @@ if [ -n "$MANAGER_TOKEN" ]; then
     fi
 fi
 
-print_status "📊 UmerchantUservice API Test Summary"
+print_status "📊 Merchant API Test Summary"
 echo "================================="
-print_success "✅ UmerchantUservice API integration test completed"
+print_success "✅ Merchant API integration test completed"
 
 echo ""
-echo "🎯 UmerchantUservice API Test Complete"
+echo "🎯 Merchant API Test Complete"
 echo "=================================================="

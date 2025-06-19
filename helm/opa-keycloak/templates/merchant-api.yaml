@@ -1,31 +1,31 @@
-{{- if .Values.merchant_service.enabled }}
+{{- if .Values.merchantApi.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: merchant-service
+  name: merchant-api
   namespace: {{ .Values.global.namespace }}
   labels:
-    app: merchant-service
+    app: merchant-api
     version: v1
 spec:
-  replicas: {{ .Values.merchant_service.replicas | default 1 }}
+  replicas: {{ .Values.merchantApi.replicas | default 1 }}
   selector:
     matchLabels:
-      app: merchant-service
+      app: merchant-api
       version: v1
   template:
     metadata:
       labels:
-        app: merchant-service
+        app: merchant-api
         version: v1
     spec:
       containers:
-      - name: merchant-service
-        image: "{{ .Values.merchant_service.image.repository }}:{{ .Values.merchant_service.image.tag }}"
+      - name: merchant-api
+        image: "{{ .Values.merchantApi.image.repository }}:{{ .Values.merchantApi.image.tag }}"
         ports:
         - containerPort: 8080
         resources:
-          {{- toYaml .Values.merchant_service.resources | nindent 10 }}
+          {{- toYaml .Values.merchantApi.resources | nindent 10 }}
         env:
         - name: PORT
           value: "8080"
@@ -45,13 +45,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: merchant-service-service
+  name: merchant-api-service
   namespace: {{ .Values.global.namespace }}
   labels:
-    app: merchant-service
+    app: merchant-api
 spec:
   selector:
-    app: merchant-service
+    app: merchant-api
   ports:
   - port: 8080
     targetPort: 8080

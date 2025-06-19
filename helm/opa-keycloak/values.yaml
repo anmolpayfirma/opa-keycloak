@@ -162,12 +162,13 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 80
 
-# UmerchantUservice API Configuration
-merchant_service:
+# Merchant API Configuration
+merchantApi:
   enabled: true
   image:
-    repository: merchant-service
+    repository: localhost:5000/merchant-api
     tag: latest
+    pullPolicy: Never
   replicas: 1
   resources:
     requests:
@@ -176,3 +177,6 @@ merchant_service:
     limits:
       memory: "256Mi"
       cpu: "200m"
+  service:
+    type: ClusterIP
+    port: 8080
