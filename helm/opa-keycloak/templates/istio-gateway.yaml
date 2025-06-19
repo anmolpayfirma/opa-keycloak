@@ -44,6 +44,17 @@ spec:
         host: employee-api-service
         port:
           number: 8080
+  # Merchant Service routes (Java Spring Boot microservice)
+  {{- if .Values.merchant_service.enabled }}
+  - match:
+    - uri:
+        prefix: /api/v1/merchants
+    route:
+    - destination:
+        host: merchant-service
+        port:
+          number: 8080
+  {{- end }}
   # Health check route
   - match:
     - uri:
