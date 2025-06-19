@@ -58,39 +58,23 @@ print_success "Employee API image built and pushed"
 
 cd ../..
 
-# Build Auth Service
-print_status "Building Auth Service..."
-cd apps/auth-service
-
-if [ ! -f "Dockerfile" ]; then
-    print_error "Dockerfile not found in apps/auth-service/"
-    exit 1
-fi
-
-if [ ! -f "app.py" ]; then
-    print_error "app.py not found in apps/auth-service/"
-    exit 1
-fi
-
-print_status "Building localhost:5000/auth-service:latest..."
-docker build -t localhost:5000/auth-service:latest .
-docker push localhost:5000/auth-service:latest
-print_success "Auth Service image built and pushed"
-
-cd ../..
+# Auth Service has been removed - migrated to Istio OPA Integration
+print_status "Auth Service has been migrated to Istio OPA Integration"
+print_status "No longer building auth-service - using native Istio authorization"
 
 # Verify images
 print_status "Verifying built images..."
 echo ""
 print_status "Available images in minikube registry:"
-docker images | grep -E "(employee-api|auth-service)" || print_warning "No matching images found"
+docker images | grep -E "employee-api" || print_warning "No matching images found"
 
 echo ""
 print_success "🎉 Docker images built successfully!"
 echo ""
 print_status "Built images:"
 echo "  📦 localhost:5000/employee-api:v2.0.0"
-echo "  📦 localhost:5000/auth-service:latest"
+echo ""
+print_status "ℹ️  Auth-service replaced by Istio OPA external authorization"
 echo ""
 print_status "These images are now available in your minikube Docker registry"
 print_status "and can be used by the Helm deployment."

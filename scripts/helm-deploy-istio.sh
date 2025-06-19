@@ -71,12 +71,9 @@ eval $(minikube docker-env)
 docker build -f Dockerfile -t ${REGISTRY}/employee-api:v2.0.0 .
 cd ../..
 
-# Build Auth Service
-print_status "Building Auth Service..."
-cd apps/auth-service
-eval $(minikube docker-env)
-docker build -t ${REGISTRY}/auth-service:latest .
-cd ../..
+# Auth Service has been migrated to Istio OPA Integration
+print_status "Auth Service has been migrated to Istio OPA Integration"
+print_status "No longer building auth-service - using native Istio authorization"
 
 print_success "Docker images built successfully"
 
@@ -90,8 +87,6 @@ helm install ${RELEASE_NAME} ${CHART_PATH} \
     --set global.namespace=${NAMESPACE} \
     --set employeeApi.image=${REGISTRY}/employee-api:v2.0.0 \
     --set employeeApi.imagePullPolicy=IfNotPresent \
-    --set authService.image=${REGISTRY}/auth-service:latest \
-    --set authService.imagePullPolicy=IfNotPresent \
     --set istio.enabled=true \
     --set kong.enabled=false
 

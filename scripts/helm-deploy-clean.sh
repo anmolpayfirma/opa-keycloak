@@ -100,7 +100,7 @@ if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
    if [ "$SPOT_INSTANCE_DNS_NAME" != "" ]; then
        print_status "Cleaning images on cloud minikube..."
        ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -p 2222 -i ${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key} docker@$SPOT_INSTANCE_DNS_NAME \
-           "docker images | grep -E '(employee-api|auth-service)' | grep latest | awk '{print \$1\":\"\$2}' | xargs -r docker rmi -f" || true
+           "docker images | grep -E 'employee-api' | grep latest | awk '{print \$1\":\"\$2}' | xargs -r docker rmi -f" || true
    else
        print_warning "Not deleting latest images because SPOT_INSTANCE_DNS_NAME is not set..."
    fi
@@ -130,23 +130,9 @@ else
 fi
 cd ../..
 
-# Build Auth Service
-print_status "Building Auth Service..."
-cd apps/auth-service
-if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    # Start SSH agent in a shell-agnostic way
-    SSH_AGENT_OUTPUT=$(ssh-agent)
-    export SSH_AUTH_SOCK=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AUTH_SOCK | cut -d';' -f1 | cut -d'=' -f2)
-    export SSH_AGENT_PID=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AGENT_PID | cut -d';' -f1 | cut -d'=' -f2)
-    MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
-    ssh-add $MINIKUBE_SSH_KEY
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -t auth-service:latest .
-    kill $SSH_AGENT_PID 2>/dev/null || true
-else
-    eval $(minikube docker-env)
-    docker build -t ${REGISTRY}/auth-service:latest .
-fi
-cd ../..
+# Auth Service has been migrated to Istio OPA Integration
+print_status "Auth Service has been migrated to Istio OPA Integration"
+print_status "No longer building auth-service - using native Istio authorization"
 
 print_success "Docker images built successfully"
 
@@ -164,10 +150,8 @@ print_status "Step 2F: Installing Helm chart..."
 # For cloud minikube, don't use registry prefix since images are built directly in minikube
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
     EMPLOYEE_IMAGE="employee-api:v2.0.0"
-    AUTH_IMAGE="auth-service:latest"
 else
     EMPLOYEE_IMAGE="${REGISTRY}/employee-api:v2.0.0"
-    AUTH_IMAGE="${REGISTRY}/auth-service:latest"
 fi
 
 helm -n${NAMESPACE} install ${RELEASE_NAME} ${CHART_PATH} \
@@ -177,8 +161,8 @@ helm -n${NAMESPACE} install ${RELEASE_NAME} ${CHART_PATH} \
     --set global.namespace=${NAMESPACE} \
     --set employeeApi.image=${EMPLOYEE_IMAGE} \
     --set employeeApi.imagePullPolicy=Never \
-    --set authService.image=${AUTH_IMAGE} \
-    --set authService.imagePullPolicy=Never
+    --set istio.enabled=true \
+    --set istio.opaExtAuthz.enabled=true
 
 if [ "$?" != "0" ]; then
     print_error "Couldn't install ${RELEASE_NAME} chart. Bailing"
@@ -313,7 +297,7 @@ print_status "=========================="
 echo "✅ PostgreSQL Database (persistent storage)"
 echo "✅ Keycloak Identity Management"
 echo "✅ Employee API (PostgreSQL-enabled v2.0.0)"
-echo "✅ Auth Service (JWT validation)"
+echo "✅ OPA-Envoy (Istio external authorization)"
 echo "✅ OPA Policy Engine"
 echo "✅ Kong API Gateway"
 echo ""

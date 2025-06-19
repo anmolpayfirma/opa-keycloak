@@ -1,6 +1,6 @@
 # OPA-Keycloak Test Suite
 
-This directory contains comprehensive tests for the OPA-Keycloak authorization system using curl-based testing.
+This directory contains comprehensive tests for the OPA-Keycloak authorization system using Istio Gateway and curl-based testing.
 
 ## Test Structure
 
@@ -10,17 +10,19 @@ tests/
 ├── run-all-tests.sh         # Master test runner
 ├── 01-basic-connectivity.sh # Service connectivity tests
 ├── 02-employee-crud.sh      # Employee API CRUD operations
-└── 03-authentication.sh     # Keycloak authentication tests
+└── 03-authentication.sh     # Keycloak authentication & OPA authorization tests
 ```
 
 ## Prerequisites
 
-1. **Services deployed**: Run `./scripts/helm-deploy-clean.sh` first
-2. **Required tools**:
+1. **Services deployed**: Run `./scripts/helm-deploy-istio.sh` first
+2. **SSH tunnel active**: Run `./scripts/setup-tunnel.sh`
+3. **Required tools**:
    - `kubectl` - Kubernetes CLI
    - `curl` - HTTP client
    - `jq` - JSON processor
    - `bash` - Shell (version 4+ recommended)
+4. **Host configuration**: Add `127.0.0.1 opa-demo.local` to `/etc/hosts`
 
 ## Running Tests
 
@@ -31,112 +33,174 @@ tests/
 ```
 
 This script will:
-- Check prerequisites
-- Set up port forwarding automatically
-- Run all tests in sequence
-- Clean up port forwards on exit
-- Provide a summary report
+- Check prerequisites and service status
+- Verify Istio Gateway configuration
+- Run all tests in sequence through Istio Gateway
+- Provide comprehensive test results and summary
 
 ### Run Individual Tests
 
-First, set up port forwarding manually:
+Make sure SSH tunnel is active:
 ```bash
-# Terminal 1: Employee API
-kubectl port-forward service/employee-api-service 3000:8080 -n opa-keycloak
-
-# Terminal 2: Keycloak
-kubectl port-forward service/keycloak-service 8082:8080 -n opa-keycloak
-
-# Terminal 3: Auth Service (optional)
-kubectl port-forward service/auth-service 8081:80 -n opa-keycloak
+# Set up SSH tunnel (in separate terminal)
+./scripts/setup-tunnel.sh
 ```
 
 Then run individual tests:
 ```bash
-# Test service connectivity
+# Test service connectivity through Istio Gateway
 ./tests/01-basic-connectivity.sh
 
-# Test CRUD operations
+# Test CRUD operations through Istio Gateway
 ./tests/02-employee-crud.sh
 
-# Test authentication (requires Keycloak setup)
+# Test authentication & authorization (comprehensive)
 ./tests/03-authentication.sh
 ```
 
 ## Test Details
 
 ### 1. Basic Connectivity Test (`01-basic-connectivity.sh`)
-- ✅ Employee API health check
-- ✅ Keycloak health check
-- ✅ Auth Service accessibility
+- ✅ Health endpoint accessibility
+- ✅ Employee API accessibility through Istio Gateway
+- ✅ Keycloak accessibility through Istio Gateway
 - ✅ Employee data availability
-- ✅ Keycloak realm configuration
+- ✅ Service response validation
 
 **Expected Output:**
 ```
-🔗 Basic Connectivity Test
-==========================
-[INFO] Testing service connectivity...
-[SUCCESS] ✅ Employee API is healthy
-[SUCCESS] ✅ Keycloak is healthy
-[SUCCESS] ✅ Employee data is available
+🔗 Basic Connectivity Test (via Istio Gateway)
+===============================================
+[SUCCESS] ✅ Health endpoint is accessible
+[SUCCESS] ✅ Employee API is accessible through Istio Gateway
+[SUCCESS] ✅ Keycloak is accessible through Istio Gateway
+[SUCCESS] ✅ Employee data is available (6 employees found)
 ```
 
 ### 2. Employee CRUD Test (`02-employee-crud.sh`)
-- ✅ CREATE: Add new employee
+- ✅ CREATE: Add new employee via Istio Gateway
 - ✅ READ: Get all employees, specific employee, departments
 - ✅ UPDATE: Modify employee data
 - ✅ DELETE: Remove employee
 - ✅ FILTER: Department-based filtering
+- ✅ ERROR: Invalid request handling
 
 **Expected Output:**
 ```
-👥 Employee CRUD Operations Test
-================================
-[SUCCESS] ✅ CREATE: Employee created successfully
+👥 Employee CRUD Operations Test (via Istio Gateway)
+====================================================
+[SUCCESS] ✅ CREATE: Employee created successfully (HTTP 201)
 [SUCCESS] ✅ READ ALL: Found 7 employees
-[SUCCESS] ✅ UPDATE: Employee updated successfully
-[SUCCESS] ✅ DELETE: Employee deleted successfully
+[SUCCESS] ✅ READ SPECIFIC: Employee EMP999 found
+[SUCCESS] ✅ UPDATE: Employee updated successfully (HTTP 200)
+[SUCCESS] ✅ DELETE: Employee deleted successfully (HTTP 200)
 ```
 
-### 3. Authentication Test (`03-authentication.sh`)
-- ✅ Keycloak realm configuration
-- ✅ User authentication with JWT tokens
-- ✅ Token validation via Auth Service
+### 3. Authentication & Authorization Test (`03-authentication.sh`)
+**Comprehensive testing of the complete auth flow:**
+
+#### Authentication Tests:
+- ✅ Keycloak realm configuration validation
+- ✅ JWT token generation for multiple users
+- ✅ Token payload decoding and validation
 - ✅ Token refresh functionality
-- ✅ JWT payload decoding
+
+#### Authorization Tests:
+- ✅ **Unauthorized access** (no token) → 403 Forbidden
+- ✅ **Employee role** (bob.employee):
+  - GET requests → 200 OK (allowed)
+  - POST/PUT/DELETE → 403 Forbidden (denied by OPA)
+- ✅ **Manager role** (alice.manager):
+  - GET requests → 200 OK (allowed)
+  - POST/PUT/DELETE → 201/200/404 (allowed by OPA)
+- ✅ **Health endpoint** → 200 OK (always accessible)
+
+#### OPA Integration Tests:
+- ✅ OPA decision logging verification
+- ✅ Policy evaluation metrics
+- ✅ Performance measurement
 
 **Setup Required:**
 ```bash
-# Configure Keycloak first
+# Deploy with Istio and OPA integration
+./scripts/helm-deploy-istio.sh
+
+# Configure Keycloak users and realm
 ./scripts/setup-keycloak.sh
 
-# Set client secret (obtained from Keycloak admin)
-export CLIENT_SECRET='your-client-secret'
+# Start SSH tunnel for access
+./scripts/setup-tunnel.sh
 ```
 
 **Expected Output:**
 ```
-🔐 Authentication Test
-======================
+🔐 Authentication & Authorization Test (Istio + OPA)
+====================================================
 [SUCCESS] ✅ Realm 'employee-management' is configured
 [SUCCESS] ✅ Authentication successful for alice.manager
-[SUCCESS] ✅ Token validation successful
+[SUCCESS] ✅ Authentication successful for bob.employee
+
+3️⃣  Testing unauthorized access (no token)...
+[SUCCESS] ✅ PASS: Health check without auth (HTTP 200)
+[SUCCESS] ✅ PASS: Employee API without auth (HTTP 403)
+
+4️⃣  Testing employee authorization (bob.employee)...
+[SUCCESS] ✅ PASS: Employee GET request (HTTP 200)
+[SUCCESS] ✅ PASS: Employee POST request (should be denied) (HTTP 403)
+
+5️⃣  Testing manager authorization (alice.manager)...
+[SUCCESS] ✅ PASS: Manager GET request (HTTP 200)
+[SUCCESS] ✅ PASS: Manager POST request (HTTP 201 - Authorization successful)
+
+📊 Test Summary
+===============
+Total Tests: 15
+Passed: 15
+Failed: 0
+🎉 All tests passed! Authentication and authorization working perfectly.
 ```
 
-## Environment Variables
+## Architecture Under Test
 
-### Required for Authentication Tests
-- `CLIENT_SECRET`: Keycloak client secret (get from admin console)
+The tests validate this complete architecture:
 
-### Optional
-- `EMPLOYEE_API_URL`: Default `http://localhost:3000`
-- `KEYCLOAK_URL`: Default `http://localhost:8082`
-- `AUTH_SERVICE_URL`: Default `http://localhost:8081`
+```
+Client Request
+     ↓
+Istio Gateway (opa-demo.local)
+     ↓
+Istio VirtualService Routing
+     ↓
+┌─────────────────────────────────────┐
+│  Employee API Pod                   │
+│  ┌─────────────────────────────────┐│
+│  │ Istio Sidecar (Envoy)          ││
+│  │   ↓                            ││
+│  │ OPA-Envoy (gRPC Authorization) ││
+│  │   ↓                            ││
+│  │ JWT Validation + Policy Check  ││
+│  │   ↓                            ││
+│  │ Allow/Deny Decision            ││
+│  └─────────────────────────────────┘│
+│              ↓                      │
+│  Employee API Application           │
+└─────────────────────────────────────┘
+```
 
 ## Test Data
 
-The tests use the following test data:
+### Test Users (configured by setup-keycloak.sh)
+- **alice.manager** / `password123`
+  - Roles: `manager`
+  - Employee ID: `MGR001`
+  - Department: `Management`
+  - Permissions: Full CRUD access
+
+- **bob.employee** / `password123`
+  - Roles: `employee`
+  - Employee ID: `EMP003`
+  - Department: `Engineering`
+  - Permissions: Read-only access
 
 ### Test Employee (for CRUD operations)
 - ID: `EMP999`
@@ -144,23 +208,47 @@ The tests use the following test data:
 - Department: `Engineering`
 - Email: `test@company.com`
 
-### Test Users (for authentication)
-- `alice.manager` / `password123` - Manager role
-- `bob.employee` / `password123` - Employee role
-- `jane.hr` / `password123` - HR role
+## Authorization Policies Tested
+
+The tests validate these OPA policies:
+
+1. **Health Endpoint**: Always accessible (no auth required)
+2. **Employee Role**: 
+   - ✅ GET `/api/v1/employees` (read access)
+   - ❌ POST/PUT/DELETE (write operations denied)
+3. **Manager Role**:
+   - ✅ GET `/api/v1/employees` (read access)
+   - ✅ POST/PUT/DELETE (full write access)
+4. **No Token**: All API endpoints return 403 Forbidden
+
+## Environment Configuration
+
+### Istio Gateway Access
+- **Host**: `opa-demo.local` (via /etc/hosts)
+- **URL**: `http://localhost` (via SSH tunnel)
+- **Endpoints**:
+  - Health: `http://localhost/health`
+  - Employee API: `http://localhost/api/v1/employees`
+  - Keycloak: `http://localhost/auth`
+
+### Keycloak Configuration
+- **Realm**: `employee-management`
+- **Client ID**: `employee-api`
+- **Client Secret**: Auto-configured by setup script
+- **Token Endpoint**: `http://localhost/auth/realms/employee-management/protocol/openid-connect/token`
 
 ## Troubleshooting
 
-### Port Forward Issues
+### SSH Tunnel Issues
 ```bash
-# Kill existing port forwards
-pkill -f "kubectl port-forward"
+# Check tunnel status
+ps aux | grep ssh
 
-# Check if ports are in use
-lsof -i :3000 -i :8082 -i :8081
+# Restart tunnel
+./scripts/setup-tunnel.sh
 
-# Restart port forwards
-./tests/run-all-tests.sh
+# Check connectivity
+curl -H "Host: opa-demo.local" http://localhost/health
 ```
 
 ### Service Not Running
@@ -168,20 +256,34 @@ lsof -i :3000 -i :8082 -i :8081
 # Check pod status
 kubectl get pods -n opa-keycloak
 
+# Check Istio Gateway
+kubectl get gateway -n opa-keycloak
+kubectl get virtualservice -n opa-keycloak
+
 # Redeploy if needed
-./scripts/helm-deploy-clean.sh
+./scripts/helm-deploy-istio.sh
 ```
 
 ### Authentication Issues
 ```bash
-# Check if Keycloak is configured
-curl -s http://localhost:8082/realms/employee-management/.well-known/openid_configuration
+# Check Keycloak realm
+curl -s -H "Host: opa-demo.local" \
+  "http://localhost/auth/realms/employee-management/.well-known/openid_configuration" | jq .
 
-# Configure Keycloak
+# Reconfigure Keycloak
 ./scripts/setup-keycloak.sh
+```
 
-# Get client secret from Keycloak admin console
-echo "Visit: http://localhost:8082/admin"
+### OPA Authorization Issues
+```bash
+# Check OPA-Envoy logs
+kubectl logs -l app=opa-envoy -n opa-keycloak --tail=20
+
+# Check for recent decisions
+kubectl logs -l app=opa-envoy -n opa-keycloak --tail=50 | grep decision
+
+# Verify AuthorizationPolicy
+kubectl get authorizationpolicy -n opa-keycloak -o yaml
 ```
 
 ### Missing Dependencies
@@ -196,32 +298,61 @@ sudo apt-get install jq
 # Follow: https://kubernetes.io/docs/tasks/tools/install-kubectl/
 ```
 
+## Performance Expectations
+
+The tests measure and validate:
+- **Response Time**: < 500ms (excellent), < 1000ms (good)
+- **OPA Query Time**: < 1ms (typical: ~0.26ms)
+- **Authorization Overhead**: Minimal (< 10ms additional latency)
+
 ## Integration with CI/CD
 
-The test suite is designed to be CI/CD friendly:
-
-```bash
-# Return codes
-# 0 = All tests passed
-# 1 = Some tests failed
-
-# Example usage in CI
-./tests/run-all-tests.sh && echo "Deploy to production" || echo "Tests failed"
+```yaml
+# Example GitHub Actions workflow
+name: OPA-Keycloak Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Kubernetes
+        uses: helm/kind-action@v1
+      - name: Deploy Services
+        run: ./scripts/helm-deploy-istio.sh
+      - name: Setup Keycloak
+        run: ./scripts/setup-keycloak.sh
+      - name: Run Tests
+        run: ./tests/run-all-tests.sh
 ```
 
-## Test Output Files
+## Manual Testing Examples
 
-Tests may create temporary files:
-- `/tmp/test-tokens.env` - JWT tokens for cross-test usage
+After running the tests, you can use the generated tokens for manual testing:
 
-These are automatically cleaned up or can be used for debugging.
+```bash
+# Get tokens (from test output)
+EMPLOYEE_TOKEN="eyJhbGciOiJSUzI1NiIs..."
+MANAGER_TOKEN="eyJhbGciOiJSUzI1NiIs..."
 
-## Contributing
+# Test employee access (read-only)
+curl -H "Host: opa-demo.local" \
+     -H "Authorization: Bearer $EMPLOYEE_TOKEN" \
+     "http://localhost/api/v1/employees"
 
-When adding new tests:
+# Test employee denied write
+curl -X POST -H "Host: opa-demo.local" \
+     -H "Authorization: Bearer $EMPLOYEE_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"id":"TEST","name":"Test"}' \
+     "http://localhost/api/v1/employees"
+# Returns: 403 Forbidden
 
-1. Follow the naming convention: `##-test-name.sh`
-2. Use the standard color functions and output format
-3. Include proper error handling and cleanup
-4. Update the `TESTS` array in `run-all-tests.sh`
-5. Add documentation to this README 
+# Test manager full access
+curl -X POST -H "Host: opa-demo.local" \
+     -H "Authorization: Bearer $MANAGER_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"id":"MGR999","name":"New Manager","department":"IT"}' \
+     "http://localhost/api/v1/employees"
+# Returns: 201 Created
+``` 

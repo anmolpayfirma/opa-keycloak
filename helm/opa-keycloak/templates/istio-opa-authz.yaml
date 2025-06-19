@@ -1,0 +1,195 @@
+{{- if and .Values.istio.enabled .Values.istio.opaExtAuthz.enabled }}
+# OPA-Envoy ConfigMap for Istio integration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-envoy-config
+  namespace: {{ .Values.global.namespace }}
+data:
+  config.yaml: |
+    services:
+      authz:
+        url: http://127.0.0.1:8181
+    bundles:
+      authz:
+        resource: /v1/data
+    decision_logs:
+      console: true
+  
+  # Updated OPA policy for Istio integration
+  istio-authz.rego: |
+    package istio.authz
+
+    import rego.v1
+
+    default allow := false
+
+    # Allow health check without authentication
+    allow if {
+        input.parsed_path[0] == "health"
+        input.attributes.request.http.method == "GET"
+    }
+
+    # Extract JWT token from Authorization header
+    token := payload if {
+        auth_header := input.attributes.request.http.headers.authorization
+        startswith(auth_header, "Bearer ")
+        encoded := substring(auth_header, 7, -1)
+        [_, payload, _] := io.jwt.decode(encoded)
+    }
+
+    # Allow managers to access any employee record
+    allow if {
+        token.realm_access.roles[_] == "manager"
+        startswith(input.attributes.request.http.path, "/api/v1/employees")
+        input.attributes.request.http.method in ["GET", "POST", "PUT", "DELETE"]
+    }
+
+    # Allow employees to access only their own records (GET only)
+    allow if {
+        token.realm_access.roles[_] == "employee"
+        input.attributes.request.http.method == "GET"
+        startswith(input.attributes.request.http.path, "/api/v1/employees/")
+        employee_id := substring(input.attributes.request.http.path, 18, -1)
+        token.employee_id == employee_id
+    }
+
+    # Allow employees to view employee list (their own record will be filtered by API)
+    allow if {
+        token.realm_access.roles[_] == "employee"
+        input.attributes.request.http.method == "GET"
+        input.attributes.request.http.path == "/api/v1/employees"
+    }
+
+---
+# ServiceEntry for OPA-Envoy external authorization
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: opa-ext-authz-grpc-local
+  namespace: {{ .Values.global.namespace }}
+spec:
+  hosts:
+  - opa-ext-authz-grpc.local
+  ports:
+  - number: 9191
+    name: grpc
+    protocol: GRPC
+  resolution: DNS
+  endpoints:
+  - address: opa-ext-authz-grpc.{{ .Values.global.namespace }}.svc.cluster.local
+    ports:
+      grpc: 9191
+
+---
+# AuthorizationPolicy to enable OPA external authorization
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ext-authz
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: employee-api
+  action: CUSTOM
+  provider:
+    name: opa-ext-authz-grpc
+  rules:
+  - to:
+    - operation:
+        paths: ["/api/v1/employees*"]
+
+---
+# Updated OPA Deployment with Envoy plugin
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa-envoy
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: opa-envoy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa-envoy
+  template:
+    metadata:
+      labels:
+        app: opa-envoy
+    spec:
+      containers:
+      - name: opa-envoy
+        image: openpolicyagent/opa:latest-envoy
+        ports:
+        - containerPort: 8181
+          name: http
+        - containerPort: 9191
+          name: grpc
+        args:
+          - "run"
+          - "--server"
+          - "--addr=0.0.0.0:8181"
+          - "--diagnostic-addr=0.0.0.0:8282"
+          - "--set=plugins.envoy_ext_authz_grpc.addr=:9191"
+          - "--set=plugins.envoy_ext_authz_grpc.query=data.istio.authz.allow"
+          - "--set=decision_logs.console=true"
+          - "/policies/istio-authz.rego"
+        volumeMounts:
+        - name: opa-policies
+          mountPath: /policies
+        - name: opa-config
+          mountPath: /config
+        env:
+        - name: OPA_LOG_LEVEL
+          value: "info"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8282
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8282
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: opa-policies
+        configMap:
+          name: opa-envoy-config
+      - name: opa-config
+        configMap:
+          name: opa-envoy-config
+
+---
+# Service for OPA-Envoy
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa-ext-authz-grpc
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: opa-envoy
+spec:
+  selector:
+    app: opa-envoy
+  ports:
+  - name: http
+    port: 8181
+    targetPort: 8181
+  - name: grpc
+    port: 9191
+    targetPort: 9191
+  type: ClusterIP
+
+{{- end }} 
