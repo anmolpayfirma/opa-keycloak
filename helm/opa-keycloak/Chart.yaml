@@ -1,5 +1,5 @@
 apiVersion: v2
-name: opa-keycloak-postgres
+name: opa-keycloak
 description: A Helm chart for OPA + Keycloak authorization system with PostgreSQL database
 type: application
 version: 2.0.0

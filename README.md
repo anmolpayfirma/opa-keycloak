@@ -8,16 +8,16 @@ A complete example of integrating Open Policy Agent (OPA) with Keycloak for REST
 opa-keycloak/
 ├── apps/
 │   ├── employee-api/          # Employee API application
-│   │   ├── app.py            # Python REST API
-│   │   ├── app-postgres.py   # PostgreSQL-enabled version
+│   │   ├── app.py            # Python REST API with PostgreSQL
 │   │   ├── Dockerfile        # Docker build configuration
-│   │   └── requirements.txt  # Python dependencies
+│   │   ├── requirements.txt  # Python dependencies
+│   │   └── legacy/           # Legacy files (non-PostgreSQL versions)
 │   └── auth-service/         # Authentication service
 │       ├── app.py           # JWT validation service
 │       ├── Dockerfile       # Docker build configuration
 │       └── requirements.txt # Python dependencies
 ├── helm/
-│   └── opa-keycloak-postgres/ # Helm chart for complete deployment
+│   └── opa-keycloak/         # Helm chart for complete deployment
 │       ├── Chart.yaml        # Chart metadata
 │       ├── values.yaml       # Configuration values
 │       └── templates/        # Kubernetes templates
@@ -25,10 +25,11 @@ opa-keycloak/
 │   └── system/              # System configuration (Docker compatibility)
 ├── scripts/                 # Build and deployment scripts
 │   ├── helm-deploy-clean.sh # Main deployment script (recommended)
-│   ├── build-postgres-images.sh # Build Docker images
+│   ├── build-images.sh      # Build Docker images
 │   ├── setup-keycloak.sh    # Keycloak configuration
 │   ├── setup-minikube-docker.sh # Docker setup for minikube
 │   └── test-*.sh           # Testing scripts
+├── legacy/                  # Legacy files and configurations
 └── docs/
     ├── OPA-Keycloak-Practice-Guide.md # Complete setup guide
     └── HELM-MIGRATION.md     # Migration guide from manifests to Helm
@@ -116,12 +117,12 @@ export SPOT_INSTANCE_DNS_NAME=your-instance-dns
 
 ```bash
 # Build all Docker images
-./scripts/build-postgres-images.sh
+./scripts/build-images.sh
 ```
 
 ### Configuration
 
-Edit `helm/opa-keycloak-postgres/values.yaml` to customize:
+Edit `helm/opa-keycloak/values.yaml` to customize:
 - Image tags and repositories
 - Resource limits
 - Database configuration
@@ -188,7 +189,7 @@ If you're migrating from the old manifest-based deployment, see `HELM-MIGRATION.
 ## Contributing
 
 1. Make changes to application code in `apps/`
-2. Update Helm chart in `helm/opa-keycloak-postgres/` if needed
+2. Update Helm chart in `helm/opa-keycloak/` if needed
 3. Test with `./scripts/helm-deploy-clean.sh`
 4. Run tests with `./scripts/test-crud-operations.sh`
 5. Commit changes and update documentation 

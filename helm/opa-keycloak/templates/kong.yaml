@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kong-declarative-config
-  namespace: default
+  namespace: {{ .Values.global.namespace }}
 data:
   kong.yml: |
     _format_version: "3.0"
@@ -10,16 +10,16 @@ data:
     
     services:
     - name: keycloak-service
-      url: http://keycloak-service.default.svc.cluster.local:8080
+      url: http://keycloak-service.{{ .Values.global.namespace }}.svc.cluster.local:8080
       
     - name: employee-api-service
-      url: http://employee-api-service.default.svc.cluster.local:80
+      url: http://employee-api-service.{{ .Values.global.namespace }}.svc.cluster.local:8080
       
     - name: auth-service
-      url: http://auth-service.default.svc.cluster.local:80
+      url: http://auth-service.{{ .Values.global.namespace }}.svc.cluster.local:80
       
     - name: opa-service
-      url: http://opa-service.default.svc.cluster.local:8181
+      url: http://opa-service.{{ .Values.global.namespace }}.svc.cluster.local:8181
     
     routes:
     - name: keycloak-route
@@ -74,7 +74,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kong-gateway
-  namespace: default
+  namespace: {{ .Values.global.namespace }}
   labels:
     app: kong-gateway
 spec:
@@ -139,7 +139,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kong-gateway-service
-  namespace: default
+  namespace: {{ .Values.global.namespace }}
   labels:
     app: kong-gateway
 spec:

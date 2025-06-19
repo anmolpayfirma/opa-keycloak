@@ -1,4 +1,4 @@
-# OPA + Keycloak with PostgreSQL Helm Chart
+# OPA + Keycloak Helm Chart
 
 A comprehensive Helm chart for deploying a production-ready OPA + Keycloak authorization system with PostgreSQL database backend.
 
@@ -41,24 +41,24 @@ A comprehensive Helm chart for deploying a production-ready OPA + Keycloak autho
 
 1. **Build Docker Images** (if not already built):
    ```bash
-   ./scripts/build-postgres-images.sh
+   ./scripts/build-images.sh
    ```
 
 2. **Deploy with Helm**:
    ```bash
-   ./scripts/helm-deploy-simple.sh
+   ./scripts/helm-deploy-clean.sh
    ```
 
 ### Manual Installation
 
 1. **Validate the chart**:
    ```bash
-   helm lint helm/opa-keycloak-postgres
+   helm lint helm/opa-keycloak
    ```
 
 2. **Install the chart**:
    ```bash
-   helm install opa-keycloak-postgres helm/opa-keycloak-postgres \
+   helm install opa-keycloak helm/opa-keycloak \
      --namespace default \
      --create-namespace \
      --wait \
@@ -103,7 +103,7 @@ keycloak:
 
 employeeApi:
   enabled: true                   # Enable Employee API
-  image: localhost:5000/employee-api:v2.0.0-postgres
+  image: localhost:5000/employee-api:v2.0.0
   replicas: 1
 
 # ... more configuration options
@@ -115,7 +115,7 @@ employeeApi:
 |-----------|---------|---------|-------------|
 | PostgreSQL | `postgresql.persistence.size` | `5Gi` | Database storage size |
 | Keycloak | `keycloak.admin.password` | `admin123` | Admin password |
-| Employee API | `employeeApi.image` | `localhost:5000/employee-api:v2.0.0-postgres` | Docker image |
+| Employee API | `employeeApi.image` | `localhost:5000/employee-api:v2.0.0` | Docker image |
 | Kong | `kong.enabled` | `true` | Enable Kong Gateway |
 | Ingress | `ingress.enabled` | `true` | Enable NGINX Ingress |
 
@@ -125,7 +125,7 @@ employeeApi:
 
 ```bash
 # Build all required images
-./scripts/build-postgres-images.sh
+./scripts/build-images.sh
 ```
 
 ### Manual Build
@@ -136,8 +136,8 @@ eval $(minikube docker-env)
 
 # Build Employee API
 cd apps/employee-api
-docker build -f Dockerfile-postgres -t localhost:5000/employee-api:v2.0.0-postgres .
-docker push localhost:5000/employee-api:v2.0.0-postgres
+docker build -t localhost:5000/employee-api:v2.0.0 .
+docker push localhost:5000/employee-api:v2.0.0
 
 # Build Auth Service
 cd ../auth-service
@@ -198,19 +198,19 @@ echo "192.168.49.2 opa-demo.local" >> /etc/hosts
 
 ```bash
 # Check release status
-helm status opa-keycloak-postgres
+helm status opa-keycloak
 
 # Upgrade release
-helm upgrade opa-keycloak-postgres helm/opa-keycloak-postgres
+helm upgrade opa-keycloak helm/opa-keycloak
 
 # Uninstall release
-helm uninstall opa-keycloak-postgres
+helm uninstall opa-keycloak
 
 # View release history
-helm history opa-keycloak-postgres
+helm history opa-keycloak
 
 # Get all resources
-kubectl get all -l app.kubernetes.io/instance=opa-keycloak-postgres
+kubectl get all -l app.kubernetes.io/instance=opa-keycloak
 ```
 
 ### Database Management
@@ -249,18 +249,18 @@ kubectl exec -i $(kubectl get pod -l app=postgresql -o jsonpath='{.items[0].meta
 ### Horizontal Scaling
 ```bash
 # Scale Employee API
-helm upgrade opa-keycloak-postgres helm/opa-keycloak-postgres \
+helm upgrade opa-keycloak helm/opa-keycloak \
   --set employeeApi.replicas=3
 
 # Scale Keycloak
-helm upgrade opa-keycloak-postgres helm/opa-keycloak-postgres \
+helm upgrade opa-keycloak helm/opa-keycloak \
   --set keycloak.replicas=2
 ```
 
 ### Resource Scaling
 ```bash
 # Increase PostgreSQL resources
-helm upgrade opa-keycloak-postgres helm/opa-keycloak-postgres \
+helm upgrade opa-keycloak helm/opa-keycloak \
   --set postgresql.resources.limits.memory=1Gi \
   --set postgresql.persistence.size=10Gi
 ```
@@ -285,7 +285,7 @@ kubectl logs <pod-name>
 docker images | grep -E "(employee-api|auth-service)"
 
 # Rebuild images if needed
-./scripts/build-postgres-images.sh
+./scripts/build-images.sh
 ```
 
 #### Database Connection Issues
@@ -310,8 +310,8 @@ kubectl get storageclass
 
 ### Getting Help
 
-1. **Check Helm status**: `helm status opa-keycloak-postgres`
-2. **View all resources**: `kubectl get all -l app.kubernetes.io/instance=opa-keycloak-postgres`
+1. **Check Helm status**: `helm status opa-keycloak`
+2. **View all resources**: `kubectl get all -l app.kubernetes.io/instance=opa-keycloak`
 3. **Check events**: `kubectl get events --sort-by=.metadata.creationTimestamp`
 4. **View logs**: `kubectl logs -l app=<component-name>`
 

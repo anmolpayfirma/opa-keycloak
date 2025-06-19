@@ -1,4 +1,4 @@
-# Default values for opa-keycloak-postgres
+# Default values for opa-keycloak
 # This is a YAML-formatted file.
 
 global:
@@ -97,7 +97,7 @@ authService:
 # Employee API Configuration
 employeeApi:
   enabled: true
-  image: localhost:5000/employee-api:latest
+  image: localhost:5000/employee-api:v2.0.0
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:

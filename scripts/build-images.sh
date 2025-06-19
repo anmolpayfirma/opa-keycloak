@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Build PostgreSQL-enabled Docker Images
-# This script builds the necessary Docker images for the PostgreSQL-enabled system
+# Build Docker Images
+# This script builds the necessary Docker images for the OPA-Keycloak system with PostgreSQL
 
 set -e
 
-echo "🐳 Building PostgreSQL-enabled Docker Images"
-echo "============================================"
+echo "🐳 Building Docker Images"
+echo "========================="
 
 # Colors for output
 RED='\033[0;31m'
@@ -37,24 +37,24 @@ print_status "Setting up Docker environment for minikube..."
 eval $(minikube docker-env)
 print_success "Docker environment configured for minikube"
 
-# Build Employee API with PostgreSQL support
-print_status "Building Employee API with PostgreSQL support..."
+# Build Employee API
+print_status "Building Employee API..."
 cd apps/employee-api
 
-if [ ! -f "Dockerfile-postgres" ]; then
-    print_error "Dockerfile-postgres not found in apps/employee-api/"
+if [ ! -f "Dockerfile" ]; then
+    print_error "Dockerfile not found in apps/employee-api/"
     exit 1
 fi
 
-if [ ! -f "app-postgres.py" ]; then
-    print_error "app-postgres.py not found in apps/employee-api/"
+if [ ! -f "app.py" ]; then
+    print_error "app.py not found in apps/employee-api/"
     exit 1
 fi
 
-print_status "Building localhost:5000/employee-api:v2.0.0-postgres..."
-docker build -f Dockerfile-postgres -t localhost:5000/employee-api:v2.0.0-postgres .
-docker push localhost:5000/employee-api:v2.0.0-postgres
-print_success "Employee API PostgreSQL image built and pushed"
+print_status "Building localhost:5000/employee-api:v2.0.0..."
+docker build -t localhost:5000/employee-api:v2.0.0 .
+docker push localhost:5000/employee-api:v2.0.0
+print_success "Employee API image built and pushed"
 
 cd ../..
 
@@ -89,7 +89,7 @@ echo ""
 print_success "🎉 Docker images built successfully!"
 echo ""
 print_status "Built images:"
-echo "  📦 localhost:5000/employee-api:v2.0.0-postgres"
+echo "  📦 localhost:5000/employee-api:v2.0.0"
 echo "  📦 localhost:5000/auth-service:latest"
 echo ""
 print_status "These images are now available in your minikube Docker registry"

@@ -11,7 +11,7 @@ helm >/dev/null 2>&1 || { echo "Need to install helm v3.8+ "; exit 1; }
 # Configuration
 NAMESPACE="opa-keycloak"
 RELEASE_NAME="opa-keycloak"
-CHART_PATH="./helm/opa-keycloak-postgres"
+CHART_PATH="./helm/opa-keycloak"
 REGISTRY="localhost:5000"
 
 # Colors for output
@@ -92,11 +92,11 @@ if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
     eval $(ssh-agent)
     MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
     ssh-add $MINIKUBE_SSH_KEY
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -f Dockerfile-postgres -t employee-api:latest .
+    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -f Dockerfile -t employee-api:latest .
     eval $(ssh-agent -k)
 else
     eval $(minikube docker-env)
-    docker build -f Dockerfile-postgres -t ${REGISTRY}/employee-api:latest .
+    docker build -f Dockerfile -t ${REGISTRY}/employee-api:latest .
 fi
 cd ../..
 
