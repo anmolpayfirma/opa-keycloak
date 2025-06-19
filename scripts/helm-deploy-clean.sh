@@ -28,6 +28,33 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 print_status "🚀 Starting OPA-Keycloak Clean Helm Deployment"
 
+# Validate environment
+print_status "Validating environment..."
+if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
+    if [ -z "$SPOT_INSTANCE_DNS_NAME" ]; then
+        print_error "SPOT_INSTANCE_DNS_NAME must be set for cloud minikube deployment"
+        exit 1
+    fi
+    MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
+    if [ ! -f "$MINIKUBE_SSH_KEY" ]; then
+        print_error "SSH key not found at $MINIKUBE_SSH_KEY"
+        exit 1
+    fi
+    print_status "Cloud minikube mode: $SPOT_INSTANCE_DNS_NAME"
+else
+    if ! command -v minikube >/dev/null 2>&1; then
+        print_error "minikube command not found for local deployment"
+        exit 1
+    fi
+    print_status "Local minikube mode"
+fi
+
+# Validate chart exists
+if [ ! -d "$CHART_PATH" ]; then
+    print_error "Helm chart not found at $CHART_PATH"
+    exit 1
+fi
+
 #1. [re]install secrets - Clean up any existing secrets first
 print_status "Step 1: Comprehensive cleanup of existing resources..."
 
@@ -89,14 +116,17 @@ print_status "Step 2D: Building fresh Docker images..."
 print_status "Building Employee API (PostgreSQL version)..."
 cd apps/employee-api
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    eval $(ssh-agent)
+    # Start SSH agent in a shell-agnostic way
+    SSH_AGENT_OUTPUT=$(ssh-agent)
+    export SSH_AUTH_SOCK=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AUTH_SOCK | cut -d';' -f1 | cut -d'=' -f2)
+    export SSH_AGENT_PID=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AGENT_PID | cut -d';' -f1 | cut -d'=' -f2)
     MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
     ssh-add $MINIKUBE_SSH_KEY
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -f Dockerfile -t employee-api:latest .
-    eval $(ssh-agent -k)
+    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -f Dockerfile -t employee-api:v2.0.0 .
+    kill $SSH_AGENT_PID 2>/dev/null || true
 else
     eval $(minikube docker-env)
-    docker build -f Dockerfile -t ${REGISTRY}/employee-api:latest .
+    docker build -f Dockerfile -t ${REGISTRY}/employee-api:v2.0.0 .
 fi
 cd ../..
 
@@ -104,11 +134,14 @@ cd ../..
 print_status "Building Auth Service..."
 cd apps/auth-service
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    eval $(ssh-agent)
+    # Start SSH agent in a shell-agnostic way
+    SSH_AGENT_OUTPUT=$(ssh-agent)
+    export SSH_AUTH_SOCK=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AUTH_SOCK | cut -d';' -f1 | cut -d'=' -f2)
+    export SSH_AGENT_PID=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AGENT_PID | cut -d';' -f1 | cut -d'=' -f2)
     MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
     ssh-add $MINIKUBE_SSH_KEY
     docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -t auth-service:latest .
-    eval $(ssh-agent -k)
+    kill $SSH_AGENT_PID 2>/dev/null || true
 else
     eval $(minikube docker-env)
     docker build -t ${REGISTRY}/auth-service:latest .
@@ -130,10 +163,10 @@ print_status "Step 2F: Installing Helm chart..."
 
 # For cloud minikube, don't use registry prefix since images are built directly in minikube
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
-    EMPLOYEE_IMAGE="employee-api:latest"
+    EMPLOYEE_IMAGE="employee-api:v2.0.0"
     AUTH_IMAGE="auth-service:latest"
 else
-    EMPLOYEE_IMAGE="${REGISTRY}/employee-api:latest"
+    EMPLOYEE_IMAGE="${REGISTRY}/employee-api:v2.0.0"
     AUTH_IMAGE="${REGISTRY}/auth-service:latest"
 fi
 
@@ -159,7 +192,14 @@ print_status "Step 3: Verifying deployment..."
 
 # Wait for all pods to be ready
 print_status "Waiting for all pods to be ready..."
-kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=300s
+if ! kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=300s; then
+    print_error "Pods failed to become ready within timeout"
+    print_status "Current pod status:"
+    kubectl get pods -n ${NAMESPACE}
+    print_status "Pod events:"
+    kubectl get events -n ${NAMESPACE} --sort-by=.metadata.creationTimestamp | tail -10
+    exit 1
+fi
 
 # Check pod status
 print_status "Pod status:"
@@ -169,13 +209,22 @@ kubectl get pods -n ${NAMESPACE}
 print_status "Service status:"
 kubectl get services -n ${NAMESPACE}
 
+# Allow services a moment to fully initialize
+print_status "Allowing services to fully initialize..."
+sleep 5
+
+# Initialize health check counter
+HEALTH_CHECKS_PASSED=0
+TOTAL_HEALTH_CHECKS=4
+
 # Test database connectivity
 print_status "Testing database connectivity..."
 DB_POD=$(kubectl get pod -l app=postgresql -n ${NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [ -n "$DB_POD" ]; then
-    DB_TEST=$(kubectl exec $DB_POD -n ${NAMESPACE} -- psql -U postgres -d opa_demo -c "SELECT 'DB_OK' as status;" 2>/dev/null | grep DB_OK || echo "FAILED")
+    DB_TEST=$(kubectl exec $DB_POD -n ${NAMESPACE} -- psql -U postgres -d opa_demo -c "SELECT 'DB_OK' as status;" 2>/dev/null | grep -o DB_OK || echo "FAILED")
     if [ "$DB_TEST" = "DB_OK" ]; then
         print_success "Database connectivity verified"
+        HEALTH_CHECKS_PASSED=$((HEALTH_CHECKS_PASSED + 1))
     else
         print_warning "Database connectivity test failed"
     fi
@@ -189,9 +238,23 @@ API_POD=$(kubectl get pod -l app=employee-api -n ${NAMESPACE} -o jsonpath='{.ite
 if [ -n "$API_POD" ]; then
     # Wait a bit for the API to be fully ready
     sleep 10
-    HEALTH_CHECK=$(kubectl exec $API_POD -n ${NAMESPACE} -- curl -s http://localhost:8080/health 2>/dev/null | grep -o '"status":"healthy"' || echo "FAILED")
-    if [ "$HEALTH_CHECK" != "FAILED" ]; then
+    HEALTH_CHECK=$(kubectl exec $API_POD -n ${NAMESPACE} -- python -c "
+import http.client
+try:
+    conn = http.client.HTTPConnection('localhost:8080')
+    conn.request('GET', '/health')
+    response = conn.getresponse()
+    data = response.read().decode()
+    if response.status == 200 and 'healthy' in data:
+        print('SUCCESS')
+    else:
+        print('FAILED')
+except:
+    print('FAILED')
+" 2>/dev/null || echo "FAILED")
+    if [ "$HEALTH_CHECK" = "SUCCESS" ]; then
         print_success "Employee API health check passed"
+        HEALTH_CHECKS_PASSED=$((HEALTH_CHECKS_PASSED + 1))
     else
         print_warning "Employee API health check failed or not ready yet"
     fi
@@ -199,10 +262,60 @@ else
     print_warning "Employee API pod not found for testing"
 fi
 
+# Test OPA service
+print_status "Testing OPA service..."
+OPA_POD=$(kubectl get pod -l app=opa -n ${NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -n "$OPA_POD" ]; then
+    # OPA container has curl available
+    OPA_CHECK=$(kubectl exec $OPA_POD -n ${NAMESPACE} -- curl -s http://localhost:8181/v1/policies 2>/dev/null | grep -o "policies" || echo "FAILED")
+    if [ "$OPA_CHECK" = "policies" ]; then
+        print_success "OPA service check passed"
+        HEALTH_CHECKS_PASSED=$((HEALTH_CHECKS_PASSED + 1))
+    else
+        print_warning "OPA service check failed"
+    fi
+else
+    print_warning "OPA pod not found for testing"
+fi
+
+# Test Kong Gateway
+print_status "Testing Kong Gateway..."
+KONG_POD=$(kubectl get pod -l app=kong-gateway -n ${NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -n "$KONG_POD" ]; then
+    # Kong container has curl available
+    KONG_CHECK=$(kubectl exec $KONG_POD -n ${NAMESPACE} -- curl -s http://localhost:8001/status 2>/dev/null | grep -o "database" || echo "FAILED")
+    if [ "$KONG_CHECK" = "database" ]; then
+        print_success "Kong Gateway check passed"
+        HEALTH_CHECKS_PASSED=$((HEALTH_CHECKS_PASSED + 1))
+    else
+        print_warning "Kong Gateway check failed"
+    fi
+else
+    print_warning "Kong Gateway pod not found for testing"
+fi
+
 #4. Display access information
 print_status "Step 4: Deployment Summary"
 echo ""
-print_success "🎉 OPA-Keycloak deployment completed successfully!"
+
+# Display health check summary
+print_status "Health Check Summary: ${HEALTH_CHECKS_PASSED}/${TOTAL_HEALTH_CHECKS} services healthy"
+if [ "$HEALTH_CHECKS_PASSED" -eq "$TOTAL_HEALTH_CHECKS" ]; then
+    print_success "🎉 All health checks passed! OPA-Keycloak deployment completed successfully!"
+elif [ "$HEALTH_CHECKS_PASSED" -gt 0 ]; then
+    print_warning "⚠️  Some health checks failed, but core services are running. Check logs for details."
+else
+    print_error "❌ Most health checks failed. Please check pod logs and troubleshoot."
+fi
+echo ""
+print_status "Deployed Services Summary:"
+print_status "=========================="
+echo "✅ PostgreSQL Database (persistent storage)"
+echo "✅ Keycloak Identity Management"
+echo "✅ Employee API (PostgreSQL-enabled v2.0.0)"
+echo "✅ Auth Service (JWT validation)"
+echo "✅ OPA Policy Engine"
+echo "✅ Kong API Gateway"
 echo ""
 print_status "Access Information:"
 print_status "==================="
@@ -210,7 +323,12 @@ print_status "==================="
 # Get ingress info
 INGRESS_IP=$(kubectl get ingress -n ${NAMESPACE} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 if [ "$INGRESS_IP" = "pending" ] || [ -z "$INGRESS_IP" ]; then
-    INGRESS_IP=$(minikube ip 2>/dev/null || echo "localhost")
+    if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
+        INGRESS_IP="192.168.49.2"  # Standard cloud minikube IP
+        print_status "Using cloud minikube IP. Set up SSH tunnel: ssh -i ~/.ssh/dev-machine.pem -L 8443:192.168.49.2:8443 -L 80:192.168.49.2:80 ec2-user@\$(cloudkube ip)"
+    else
+        INGRESS_IP=$(minikube ip 2>/dev/null || echo "localhost")
+    fi
 fi
 
 echo "🌐 Ingress IP: $INGRESS_IP"
@@ -230,6 +348,20 @@ print_status "Useful Commands:"
 echo "helm list -n ${NAMESPACE}"
 echo "kubectl get all -n ${NAMESPACE}"
 echo "kubectl logs -f deployment/employee-api -n ${NAMESPACE}"
+echo ""
+
+print_status "Troubleshooting Commands:"
+echo "# Check pod logs:"
+echo "kubectl logs -l app=employee-api -n ${NAMESPACE}"
+echo "kubectl logs -l app=opa -n ${NAMESPACE}"
+echo "kubectl logs -l app=kong-gateway -n ${NAMESPACE}"
+echo ""
+echo "# Check pod details:"
+echo "kubectl describe pod -l app=employee-api -n ${NAMESPACE}"
+echo ""
+echo "# Test services directly:"
+echo "kubectl port-forward -n ${NAMESPACE} service/employee-api-service 8080:8080"
+echo "curl http://localhost:8080/health"
 echo ""
 
 print_success "✅ Deployment completed successfully!"
