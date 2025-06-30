@@ -128,7 +128,7 @@ class DatabaseEmployeeAPIHandler(http.server.BaseHTTPRequestHandler):
             'service': 'Employee API',
             'version': os.getenv('APP_VERSION', '3.0.0'),
             'database': db_status,
-            'authorization': 'handled_by_kong'
+            'authorization': 'handled_by_istio_opa'
         }
         status_code = 200 if db_status == 'connected' else 503
         self.send_json_response(status_code, health_data)
