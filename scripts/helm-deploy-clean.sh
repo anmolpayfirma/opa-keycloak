@@ -3,7 +3,7 @@ set -e
 set -x
 
 # OPA-Keycloak Clean Helm Deployment Script
-# Based on proven HQ deployment patterns
+# Istio-based deployment with OPA external authorization
 # Handles complete lifecycle: cleanup, build, deploy, verify
 
 helm >/dev/null 2>&1 || { echo "Need to install helm v3.8+ "; exit 1; }
@@ -68,8 +68,6 @@ kubectl -ndefault delete secrets $(kubectl -ndefault get secrets -o jsonpath='{r
 
 # Clean up problematic ConfigMaps that might conflict with Helm
 print_status "Cleaning up conflicting ConfigMaps..."
-kubectl delete configmap kong-declarative-config -n default 2>/dev/null || true
-kubectl delete configmap kong-declarative-config -n ${NAMESPACE} 2>/dev/null || true
 kubectl delete configmap opa-policies -n default 2>/dev/null || true
 kubectl delete configmap opa-policies -n ${NAMESPACE} 2>/dev/null || true
 
@@ -83,8 +81,8 @@ kubectl delete ingress --all -n default 2>/dev/null || true
 kubectl delete ingress --all -n ${NAMESPACE} 2>/dev/null || true
 
 # Also clean up any specific problematic resources
-kubectl delete ingress opa-demo-kong -n default 2>/dev/null || true
-kubectl delete ingress opa-demo-kong -n ${NAMESPACE} 2>/dev/null || true
+kubectl delete ingress opa-demo-ingress -n default 2>/dev/null || true
+kubectl delete ingress opa-demo-ingress -n ${NAMESPACE} 2>/dev/null || true
 
 #2A. [re]install latest opa-keycloak chart
 print_status "Step 2A: Uninstalling existing Helm release..."
@@ -222,7 +220,7 @@ sleep 5
 
 # Initialize health check counter
 HEALTH_CHECKS_PASSED=0
-TOTAL_HEALTH_CHECKS=4
+TOTAL_HEALTH_CHECKS=3
 
 # Test database connectivity
 print_status "Testing database connectivity..."
@@ -285,20 +283,20 @@ else
     print_warning "OPA pod not found for testing"
 fi
 
-# Test Kong Gateway
-print_status "Testing Kong Gateway..."
-KONG_POD=$(kubectl get pod -l app=kong-gateway -n ${NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-if [ -n "$KONG_POD" ]; then
-    # Kong container has curl available
-    KONG_CHECK=$(kubectl exec $KONG_POD -n ${NAMESPACE} -- curl -s http://localhost:8001/status 2>/dev/null | grep -o "database" || echo "FAILED")
-    if [ "$KONG_CHECK" = "database" ]; then
-        print_success "Kong Gateway check passed"
+# Test Keycloak service
+print_status "Testing Keycloak service..."
+KEYCLOAK_POD=$(kubectl get pod -l app=keycloak -n ${NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -n "$KEYCLOAK_POD" ]; then
+    # Test Keycloak health endpoint
+    KEYCLOAK_CHECK=$(kubectl exec $KEYCLOAK_POD -n ${NAMESPACE} -- curl -s http://localhost:8080/health/ready 2>/dev/null | grep -o "ready" || echo "FAILED")
+    if [ "$KEYCLOAK_CHECK" = "ready" ]; then
+        print_success "Keycloak service check passed"
         HEALTH_CHECKS_PASSED=$((HEALTH_CHECKS_PASSED + 1))
     else
-        print_warning "Kong Gateway check failed"
+        print_warning "Keycloak service check failed"
     fi
 else
-    print_warning "Kong Gateway pod not found for testing"
+    print_warning "Keycloak pod not found for testing"
 fi
 
 #4. Display access information
@@ -320,34 +318,35 @@ print_status "=========================="
 echo "✅ PostgreSQL Database (persistent storage)"
 echo "✅ Keycloak Identity Management"
 echo "✅ Employee API (PostgreSQL-enabled v2.0.0)"
+echo "✅ Merchant API (Java Spring Boot)"
 echo "✅ OPA-Envoy (Istio external authorization)"
 echo "✅ OPA Policy Engine"
-echo "✅ Kong API Gateway"
+echo "✅ Istio Gateway & VirtualService"
 echo ""
 print_status "Access Information:"
 print_status "==================="
 
-# Get ingress info
-INGRESS_IP=$(kubectl get ingress -n ${NAMESPACE} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
-if [ "$INGRESS_IP" = "pending" ] || [ -z "$INGRESS_IP" ]; then
-    if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
-        INGRESS_IP="192.168.49.2"  # Standard cloud minikube IP
-        print_status "Using cloud minikube IP. Set up SSH tunnel: ssh -i ~/.ssh/dev-machine.pem -L 8443:192.168.49.2:8443 -L 80:192.168.49.2:80 ec2-user@\$(cloudkube ip)"
-    else
-        INGRESS_IP=$(minikube ip 2>/dev/null || echo "localhost")
-    fi
+# Get Istio Gateway info
+ISTIO_GATEWAY_PORT=$(kubectl get svc -n istio-system istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}' 2>/dev/null || echo "31772")
+if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
+    print_status "Using cloud minikube. Set up SSH tunnel with: ./scripts/setup-tunnel.sh"
+    echo "🌐 Access via tunnel: http://opa-demo.local"
+else
+    MINIKUBE_IP=$(minikube ip 2>/dev/null || echo "localhost")
+    echo "🌐 Minikube IP: $MINIKUBE_IP:$ISTIO_GATEWAY_PORT"
 fi
 
-echo "🌐 Ingress IP: $INGRESS_IP"
-echo "🔑 Keycloak Admin: http://$INGRESS_IP/keycloak (admin/admin123)"
-echo "👥 Employee API: http://$INGRESS_IP/api/employees"
-echo "🛡️  OPA Policies: http://$INGRESS_IP:8181/v1/policies"
-echo "🚀 Kong Gateway: http://$INGRESS_IP:8000"
+echo "🔑 Keycloak Admin: http://opa-demo.local/auth/ (admin/admin123)"
+echo "👥 Employee API: http://opa-demo.local/api/v1/employees"
+echo "🏪 Merchant API: http://opa-demo.local/api/v1/merchants"
+echo "🩺 Health Check: http://opa-demo.local/health"
+echo "🛡️  OPA Policies: Direct access via port-forward"
 echo ""
 
-print_status "Port Forward Commands (if ingress not working):"
+print_status "Port Forward Commands (for direct service access):"
 echo "kubectl port-forward -n ${NAMESPACE} service/keycloak-service 8080:8080"
 echo "kubectl port-forward -n ${NAMESPACE} service/employee-api-service 3000:8080"
+echo "kubectl port-forward -n ${NAMESPACE} service/merchant-api-service 8081:8080"
 echo "kubectl port-forward -n ${NAMESPACE} service/opa-service 8181:8181"
 echo ""
 
@@ -360,8 +359,13 @@ echo ""
 print_status "Troubleshooting Commands:"
 echo "# Check pod logs:"
 echo "kubectl logs -l app=employee-api -n ${NAMESPACE}"
+echo "kubectl logs -l app=merchant-api -n ${NAMESPACE}"
+echo "kubectl logs -l app=keycloak -n ${NAMESPACE}"
 echo "kubectl logs -l app=opa -n ${NAMESPACE}"
-echo "kubectl logs -l app=kong-gateway -n ${NAMESPACE}"
+echo ""
+echo "# Check Istio Gateway status:"
+echo "kubectl get gateway,virtualservice -n ${NAMESPACE}"
+echo "kubectl get svc -n istio-system istio-ingressgateway"
 echo ""
 echo "# Check pod details:"
 echo "kubectl describe pod -l app=employee-api -n ${NAMESPACE}"
@@ -369,6 +373,10 @@ echo ""
 echo "# Test services directly:"
 echo "kubectl port-forward -n ${NAMESPACE} service/employee-api-service 8080:8080"
 echo "curl http://localhost:8080/health"
+echo ""
+echo "# Test tunnel connectivity:"
+echo "./scripts/setup-tunnel.sh  # Start tunnel"
+echo "curl http://opa-demo.local/auth/  # Test Keycloak"
 echo ""
 
 print_success "✅ Deployment completed successfully!"
