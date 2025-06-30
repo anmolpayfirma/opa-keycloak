@@ -168,7 +168,7 @@ merchantApi:
   image:
     repository: localhost:5000/merchant-api
     tag: latest
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   replicas: 1
   resources:
     requests:

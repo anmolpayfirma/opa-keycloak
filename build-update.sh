@@ -83,8 +83,16 @@ esac
 if kubectl get deployment $DEPLOYMENT_NAME -n $NAMESPACE > /dev/null 2>&1; then
     echo "Updating deployment $DEPLOYMENT_NAME with image $IMAGE_NAME"
     
+    # For cloud minikube, ensure we use the right image name format
+    if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
+        # Use the registry prefix for cloud minikube
+        DEPLOY_IMAGE_NAME="$IMAGE_NAME"
+    else
+        DEPLOY_IMAGE_NAME="$IMAGE_NAME"
+    fi
+    
     # Update the container image (container name matches service name)
-    kubectl set image deployment/$DEPLOYMENT_NAME $SERVICE=$IMAGE_NAME -n $NAMESPACE
+    kubectl set image deployment/$DEPLOYMENT_NAME $SERVICE=$DEPLOY_IMAGE_NAME -n $NAMESPACE
     
     # Wait for rollout to complete
     echo "Waiting for rollout to complete..."

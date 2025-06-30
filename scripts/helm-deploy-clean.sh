@@ -147,22 +147,45 @@ fi
 #2F. Install the chart
 print_status "Step 2F: Installing Helm chart..."
 
-# For cloud minikube, don't use registry prefix since images are built directly in minikube
+# Set image names based on environment
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
     EMPLOYEE_IMAGE="employee-api:v2.0.0"
+    MERCHANT_IMAGE="localhost:5000/merchant-api:latest"
+    IMAGE_PULL_POLICY="IfNotPresent"
 else
     EMPLOYEE_IMAGE="${REGISTRY}/employee-api:v2.0.0"
+    MERCHANT_IMAGE="${REGISTRY}/merchant-api:latest"
+    IMAGE_PULL_POLICY="Never"
 fi
 
-helm -n${NAMESPACE} install ${RELEASE_NAME} ${CHART_PATH} \
+# Try helm install first, if it fails due to existing resources, do upgrade instead
+print_status "Attempting Helm installation..."
+if ! helm -n${NAMESPACE} install ${RELEASE_NAME} ${CHART_PATH} \
     --create-namespace \
     --wait \
-    --timeout 3m \
+    --timeout 5m \
     --set global.namespace=${NAMESPACE} \
     --set employeeApi.image=${EMPLOYEE_IMAGE} \
-    --set employeeApi.imagePullPolicy=Never \
+    --set employeeApi.imagePullPolicy=${IMAGE_PULL_POLICY} \
+    --set merchantApi.image.repository=$(echo ${MERCHANT_IMAGE} | sed 's/:[^:]*$//') \
+    --set merchantApi.image.tag=$(echo ${MERCHANT_IMAGE} | sed 's/.*://') \
+    --set merchantApi.image.pullPolicy=${IMAGE_PULL_POLICY} \
     --set istio.enabled=true \
-    --set istio.opaExtAuthz.enabled=true
+    --set istio.opaExtAuthz.enabled=true 2>/dev/null; then
+    
+    print_warning "Install failed, trying upgrade instead..."
+    helm -n${NAMESPACE} upgrade ${RELEASE_NAME} ${CHART_PATH} \
+        --wait \
+        --timeout 5m \
+        --set global.namespace=${NAMESPACE} \
+        --set employeeApi.image=${EMPLOYEE_IMAGE} \
+        --set employeeApi.imagePullPolicy=${IMAGE_PULL_POLICY} \
+        --set merchantApi.image.repository=$(echo ${MERCHANT_IMAGE} | sed 's/:[^:]*$//') \
+        --set merchantApi.image.tag=$(echo ${MERCHANT_IMAGE} | sed 's/.*://') \
+        --set merchantApi.image.pullPolicy=${IMAGE_PULL_POLICY} \
+        --set istio.enabled=true \
+        --set istio.opaExtAuthz.enabled=true
+fi
 
 if [ "$?" != "0" ]; then
     print_error "Couldn't install ${RELEASE_NAME} chart. Bailing"

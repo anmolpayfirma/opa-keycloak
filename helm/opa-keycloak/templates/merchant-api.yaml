@@ -22,6 +22,7 @@ spec:
       containers:
       - name: merchant-api
         image: "{{ .Values.merchantApi.image.repository }}:{{ .Values.merchantApi.image.tag }}"
+        imagePullPolicy: {{ .Values.merchantApi.image.pullPolicy }}
         ports:
         - containerPort: 8080
         resources:
