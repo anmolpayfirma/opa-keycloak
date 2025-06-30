@@ -107,26 +107,16 @@ else
    minikube ssh "docker images | grep ${REGISTRY} | grep latest | awk '{print \$1\":\" \$2}' | xargs -r docker rmi -f" 2>/dev/null || true
 fi
 
-#2D. Build fresh images
+#2D. Build fresh images using build-update.sh
 print_status "Step 2D: Building fresh Docker images..."
 
 # Build Employee API
 print_status "Building Employee API (PostgreSQL version)..."
-cd apps/employee-api
-if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ] && [ -n "$SPOT_INSTANCE_DNS_NAME" ]; then
-    # Start SSH agent in a shell-agnostic way
-    SSH_AGENT_OUTPUT=$(ssh-agent)
-    export SSH_AUTH_SOCK=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AUTH_SOCK | cut -d';' -f1 | cut -d'=' -f2)
-    export SSH_AGENT_PID=$(echo "$SSH_AGENT_OUTPUT" | grep SSH_AGENT_PID | cut -d';' -f1 | cut -d'=' -f2)
-    MINIKUBE_SSH_KEY=${MINIKUBE_SSH_KEY:-~/.config/cloudkube/minikube-ssh-key}
-    ssh-add $MINIKUBE_SSH_KEY
-    docker -H ssh://docker@$SPOT_INSTANCE_DNS_NAME:2222 build -f Dockerfile -t employee-api:v2.0.0 .
-    kill $SSH_AGENT_PID 2>/dev/null || true
-else
-    eval $(minikube docker-env)
-    docker build -f Dockerfile -t ${REGISTRY}/employee-api:v2.0.0 .
-fi
-cd ../..
+./build-update.sh employee-api latest --build-only
+
+# Build Merchant API
+print_status "Building Merchant API (Java Spring Boot)..."
+./build-update.sh merchant-api latest --build-only
 
 # Auth Service has been migrated to Istio OPA Integration
 print_status "Auth Service has been migrated to Istio OPA Integration"
@@ -145,13 +135,13 @@ fi
 #2F. Install the chart
 print_status "Step 2F: Installing Helm chart..."
 
-# Set image names based on environment
+# Set image names based on environment (matching build-update.sh output)
 if [ "$MINIKUBE_IN_THE_CLOUD" = "y" ]; then
-    EMPLOYEE_IMAGE="employee-api:v2.0.0"
+    EMPLOYEE_IMAGE="localhost:5000/employee-api:latest"
     MERCHANT_IMAGE="localhost:5000/merchant-api:latest"
     IMAGE_PULL_POLICY="IfNotPresent"
 else
-    EMPLOYEE_IMAGE="${REGISTRY}/employee-api:v2.0.0"
+    EMPLOYEE_IMAGE="${REGISTRY}/employee-api:latest"
     MERCHANT_IMAGE="${REGISTRY}/merchant-api:latest"
     IMAGE_PULL_POLICY="Never"
 fi
@@ -317,7 +307,7 @@ print_status "Deployed Services Summary:"
 print_status "=========================="
 echo "✅ PostgreSQL Database (persistent storage)"
 echo "✅ Keycloak Identity Management"
-echo "✅ Employee API (PostgreSQL-enabled v2.0.0)"
+echo "✅ Employee API (PostgreSQL-enabled)"
 echo "✅ Merchant API (Java Spring Boot)"
 echo "✅ OPA-Envoy (Istio external authorization)"
 echo "✅ OPA Policy Engine"

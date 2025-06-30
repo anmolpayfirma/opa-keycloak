@@ -12,7 +12,7 @@ For a fresh deployment, run these commands in order:
 
 # 2. Build your microservices
 ./build-update.sh employee-api v2.0.0
-./build-update.sh merchant-api latest
+./build-update.sh merchant-api  # defaults to 'latest' tag
 
 # 3. Deploy everything
 ./scripts/helm-deploy-clean.sh
@@ -78,7 +78,11 @@ export MINIKUBE_SSH_KEY=~/.config/cloudkube/minikube-ssh-key
 
 1. **Build and deploy**:
    ```bash
-   ./build-update.sh merchant-api latest
+   ./build-update.sh merchant-api  # defaults to latest
+   # or with specific tag:
+   ./build-update.sh merchant-api v1.2.3
+   # or build-only mode:
+   ./build-update.sh merchant-api --build-only
    ```
 
 2. **Verify deployment**:

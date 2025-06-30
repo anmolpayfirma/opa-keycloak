@@ -6,9 +6,28 @@
 
 set -e
 
-# Check arguments
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 <microservice> <tag>"
+# Parse arguments
+BUILD_ONLY=false
+SERVICE=""
+TAG="latest"
+
+# Parse all arguments
+for arg in "$@"; do
+    if [ "$arg" = "--build-only" ]; then
+        BUILD_ONLY=true
+    elif [ -z "$SERVICE" ]; then
+        SERVICE="$arg"
+    elif [ "$TAG" = "latest" ]; then
+        TAG="$arg"
+    fi
+done
+
+if [ -z "$SERVICE" ] || [ $# -gt 3 ]; then
+    echo "Usage: $0 <microservice> [tag] [--build-only]"
+    echo ""
+    echo "Options:"
+    echo "  tag             Image tag (defaults to 'latest')"
+    echo "  --build-only    Only build the image, don't update deployment"
     echo ""
     echo "Available services:"
     for service_dir in apps/*/; do
@@ -19,9 +38,6 @@ if [ $# -ne 2 ]; then
     done
     exit 1
 fi
-
-SERVICE="$1"
-TAG="$2"
 SERVICE_DIR="apps/$SERVICE"
 REGISTRY="${REGISTRY:-localhost:5000}"
 IMAGE_NAME="$REGISTRY/$SERVICE:$TAG"
@@ -60,6 +76,12 @@ else
 fi
 
 echo "✅ Built: $IMAGE_NAME"
+
+# Skip deployment update if --build-only flag is set
+if [ "$BUILD_ONLY" = true ]; then
+    echo "🔧 Build-only mode: Skipping deployment update"
+    exit 0
+fi
 
 # Update Kubernetes deployment
 echo "🚀 Updating deployment..."
