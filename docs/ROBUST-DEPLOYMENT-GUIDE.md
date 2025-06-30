@@ -11,7 +11,7 @@ For a fresh deployment, run these commands in order:
 ./scripts/install-istio.sh
 
 # 2. Build your microservices
-./build-update.sh employee-api v2.0.0
+./build-update.sh employee-api latest
 ./build-update.sh merchant-api  # defaults to 'latest' tag
 
 # 3. Deploy everything

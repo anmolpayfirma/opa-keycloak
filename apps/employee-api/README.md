@@ -141,13 +141,13 @@ curl -X PUT http://api/api/v1/employees/EMP999 \
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Kong Gateway  │───▶│   Auth Service   │───▶│       OPA       │
+│ Istio Gateway   │───▶│   OPA-Envoy      │───▶│       OPA       │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                        │
          ▼                        ▼
 ┌─────────────────┐    ┌──────────────────┐
 │  Employee API   │───▶│   PostgreSQL     │
-│  (app-postgres) │    │   Database       │
+│  (PostgreSQL)   │    │   Database       │
 └─────────────────┘    └──────────────────┘
 ```
 
@@ -162,7 +162,7 @@ curl -X PUT http://api/api/v1/employees/EMP999 \
 | `DB_NAME` | `employee_api` | Database name |
 | `DB_USER` | `employee_api` | Database username |
 | `DB_PASSWORD` | `employee123` | Database password |
-| `APP_VERSION` | `3.0.0` | Application version |
+| `APP_VERSION` | `latest` | Application version |
 
 ### Database Configuration
 The application connects to PostgreSQL using the following connection string:
@@ -180,10 +180,10 @@ postgresql://employee_api:employee123@postgresql-service:5432/employee_api
 ### Build and Deploy
 ```bash
 # Build the Docker image
-docker build -f Dockerfile-postgres -t localhost:5000/employee-api:v2.0.0-postgres .
+./build-update.sh employee-api latest
 
-# Deploy to Kubernetes
-kubectl apply -f k8s/manifests/employee-api-postgres.yaml
+# Deploy to Kubernetes (via Helm)
+./scripts/helm-deploy-clean.sh
 ```
 
 ### Using the Deployment Script
@@ -280,7 +280,7 @@ kubectl run db-connections --image=postgres:15-alpine --rm -i --restart=Never --
 - **Parameterized queries** prevent SQL injection
 
 ### API Security
-- **Authorization handled by Kong Gateway**
+- **Authorization handled by Istio Gateway with OPA**
 - **Non-root container execution**
 - **Resource limits** prevent resource exhaustion
 - **CORS configuration** for web security

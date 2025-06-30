@@ -9,7 +9,7 @@ A comprehensive Helm chart for deploying a production-ready OPA + Keycloak autho
 - **Employee API** with full CRUD operations
 - **OPA Policy Engine** for authorization
 - **Auth Service** for JWT validation
-- **Kong Gateway** for API management
+- **Istio Gateway** for API management
 - **NGINX Ingress** for external access
 - **Configurable** through Helm values
 - **Production ready** with security contexts and resource limits
@@ -25,7 +25,7 @@ A comprehensive Helm chart for deploying a production-ready OPA + Keycloak autho
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Kong Gateway  │───▶│   Auth Service   │───▶│       OPA       │
+│ Istio Gateway   │───▶│   OPA-Envoy      │───▶│       OPA       │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                        │
          ▼                        ▼
@@ -115,8 +115,8 @@ employeeApi:
 |-----------|---------|---------|-------------|
 | PostgreSQL | `postgresql.persistence.size` | `5Gi` | Database storage size |
 | Keycloak | `keycloak.admin.password` | `admin123` | Admin password |
-| Employee API | `employeeApi.image` | `localhost:5000/employee-api:v2.0.0` | Docker image |
-| Kong | `kong.enabled` | `true` | Enable Kong Gateway |
+| Employee API | `employeeApi.image` | `localhost:5000/employee-api:latest` | Docker image |
+| Istio | `istio.enabled` | `true` | Enable Istio Gateway |
 | Ingress | `ingress.enabled` | `true` | Enable NGINX Ingress |
 
 ## 🐳 Building Images
@@ -137,12 +137,9 @@ eval $(minikube docker-env)
 # Build Employee API
 cd apps/employee-api
 docker build -t localhost:5000/employee-api:v2.0.0 .
-docker push localhost:5000/employee-api:v2.0.0
-
-# Build Auth Service
-cd ../auth-service
-docker build -t localhost:5000/auth-service:latest .
-docker push localhost:5000/auth-service:latest
+# Use the build script instead
+./build-update.sh employee-api latest --build-only
+./build-update.sh merchant-api latest --build-only
 ```
 
 ## 🧪 Testing

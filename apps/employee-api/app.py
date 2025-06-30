@@ -370,7 +370,7 @@ def main():
     
     print(f"Starting PostgreSQL-enabled Employee API server on port {port}")
     print(f"Database: {os.getenv('DB_HOST', 'postgresql-service')}:{os.getenv('DB_PORT', '5432')}")
-    print("Authorization is handled by Kong Gateway")
+    print("Authorization is handled by Istio Gateway with OPA")
     
     with socketserver.TCPServer(("", port), DatabaseEmployeeAPIHandler) as httpd:
         print(f"Employee API server running at http://0.0.0.0:{port}")
